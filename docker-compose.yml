@@ -86,6 +86,25 @@ services:
       LLAMA_CLOUD_API_KEY: ${LLAMA_CLOUD_API_KEY}
     command: python -m app.ingest
 
+  # --- WP-CLI: installazione WordPress/WooCommerce e seed dati demo ---
+  # Esecuzione: docker compose run --rm wpcli wp <comando>
+  # oppure lo script completo: docker compose run --rm wpcli /seed/setup.sh
+  wpcli:
+    image: wordpress:cli-php8.3
+    profiles: ["cli"]
+    depends_on:
+      db:
+        condition: service_healthy
+    user: "33:33"
+    volumes:
+      - wp_data:/var/www/html
+      - ./seed:/seed
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: wp_secret
+
 volumes:
   db_data:
   wp_data:
