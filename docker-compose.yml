@@ -1,0 +1,92 @@
+name: woo-chatbot
+
+services:
+  # --- Il negozio: WordPress + WooCommerce ---
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wp
+      MARIADB_PASSWORD: wp_secret
+      MARIADB_ROOT_PASSWORD: root_secret
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 10
+
+  wordpress:
+    image: wordpress:php8.3-apache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: wp_secret
+    volumes:
+      - wp_data:/var/www/html
+
+  # --- Vector store per il RAG ---
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/data
+    environment:
+      IS_PERSISTENT: "TRUE"
+
+  # --- Backend FastAPI: orchestratore chat (RAG + tool calling) ---
+  chatbot-api:
+    build: ./chatbot
+    depends_on:
+      - wordpress
+      - chromadb
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      LLAMA_CLOUD_API_KEY: ${LLAMA_CLOUD_API_KEY}
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION}
+      WC_BASE_URL: http://wordpress/wp-json/wc/v3
+      WC_CONSUMER_KEY: ${WC_CONSUMER_KEY}
+      WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET}
+    volumes:
+      - ./chatbot:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # --- Pipeline di ingestion (one-shot, profilo dedicato) ---
+  # Esecuzione: docker compose run --rm ingest
+  ingest:
+    build: ./chatbot
+    profiles: ["ingest"]
+    depends_on:
+      - wordpress
+      - chromadb
+    environment:
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION}
+      WC_BASE_URL: http://wordpress/wp-json/wc/v3
+      WC_CONSUMER_KEY: ${WC_CONSUMER_KEY}
+      WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      LLAMA_CLOUD_API_KEY: ${LLAMA_CLOUD_API_KEY}
+    command: python -m app.ingest
+
+volumes:
+  db_data:
+  wp_data:
+  chroma_data:
