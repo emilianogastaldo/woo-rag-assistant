@@ -24,6 +24,12 @@ class Settings(BaseSettings):
 
     # WooCommerce REST (read-only)
     wc_base_url: str = "http://wordpress/wp-json/wc/v3"
+    # URL pubblico (home_url di WordPress) usato per la base string della firma
+    # OAuth: WooCommerce la ricostruisce dal proprio home_url, non dall'host a cui
+    # ci si connette. In Docker ci si connette a wc_base_url (http://wordpress) ma
+    # si firma con wc_sign_url (es. http://localhost:8080). Vedi docs DEC-001.
+    # Se vuoto, coincide con wc_base_url.
+    wc_sign_url: str = ""
     wc_consumer_key: str = ""
     wc_consumer_secret: str = ""
 
@@ -34,6 +40,11 @@ class Settings(BaseSettings):
 
     # Sessione
     session_secret: str = "change-me-in-production"
+
+    @property
+    def wc_signing_base(self) -> str:
+        """Base URL per la firma OAuth (fallback su wc_base_url se non impostato)."""
+        return self.wc_sign_url or self.wc_base_url
 
 
 settings = Settings()
