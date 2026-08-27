@@ -78,7 +78,9 @@ class WooClient:
     async def get_json(self, path: str, params: dict | None = None) -> Any:
         return (await self.get(path, params)).json()
 
-    async def get_all(self, path: str, params: dict | None = None, per_page: int = 100) -> list[dict]:
+    async def get_all(
+        self, path: str, params: dict | None = None, per_page: int = 100
+    ) -> list[dict]:
         """Recupera tutte le pagine di una risorsa paginata WooCommerce."""
         results: list[dict] = []
         page = 1
