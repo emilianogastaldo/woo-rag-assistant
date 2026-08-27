@@ -62,8 +62,12 @@ services:
       WC_CONSUMER_KEY: ${WC_CONSUMER_KEY}
       WC_CONSUMER_SECRET: ${WC_CONSUMER_SECRET}
       SESSION_SECRET: ${SESSION_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:8000}
+      WIDGET_DIR: /widget
     volumes:
       - ./chatbot:/app
+      # Il widget è servito dal backend su /widget per comodità di demo.
+      - ./widget:/widget:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # --- Pipeline di ingestion (one-shot, profilo dedicato) ---

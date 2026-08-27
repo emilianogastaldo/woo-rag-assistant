@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>woo-rag-assistant — pagina di demo</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 48px 24px;
+        font: 16px/1.6 system-ui, sans-serif;
+        color: #1e1e1e;
+        background: #f7f6f9;
+      }
+      main { max-width: 720px; margin: 0 auto; }
+      h1 { font-size: 26px; margin-bottom: 4px; }
+      p.lead { color: #666; margin-top: 0; }
+      section { background: #fff; border-radius: 12px; padding: 20px 24px; margin-top: 20px; }
+      code { background: #f1f0f5; padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+      ol { padding-left: 20px; }
+      li { margin-bottom: 8px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>woo-rag-assistant</h1>
+      <p class="lead">
+        Pagina di prova del widget: la chat è in basso a destra. I numeri d'ordine
+        citati sono quelli stampati dal seed.
+      </p>
+
+      <section>
+        <h2>Scenari da provare</h2>
+        <ol>
+          <li>
+            Come <strong>ospite</strong>: «Quanto costa la spedizione standard?» →
+            risposta dal RAG con le fonti citate.
+          </li>
+          <li>
+            Come <strong>ospite</strong>: «A che punto è il mio ordine 22?» →
+            declino garbato e invito ad accedere (i tool ordini non sono registrati).
+          </li>
+          <li>
+            Accedi come <strong>Mario</strong>: «A che punto è il mio ordine 22?» →
+            risposta dal tool ordini.
+          </li>
+          <li>
+            Sempre come <strong>Mario</strong>, chiedi l'ordine di Luigi →
+            «ordine non trovato».
+          </li>
+          <li>
+            Caso misto: «Posso ancora restituire l'ordine 21?» → tool per la data di
+            consegna più RAG per la policy di reso.
+          </li>
+          <li>
+            Fuori dominio: «Che tempo farà domani?» → il bot declina e riporta in tema.
+          </li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Come incorporarlo</h2>
+        <p>Un solo tag, nessun build step:</p>
+        <p>
+          <code>&lt;script src="/widget/chat.js" data-api="http://localhost:8000"&gt;&lt;/script&gt;</code>
+        </p>
+      </section>
+    </main>
+
+    <script src="./chat.js" data-api="http://localhost:8000"></script>
+  </body>
+</html>
