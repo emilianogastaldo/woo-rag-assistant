@@ -38,13 +38,30 @@ class Settings(BaseSettings):
     chroma_port: int = 8000
     chroma_collection: str = "woo_knowledge"
 
+    # RAG: numero di chunk recuperati e distanza massima (coseno, 0=identico)
+    # oltre la quale un chunk è considerato non pertinente. Vedi docs DEC-005:
+    # la soglia va calibrata con `evals/run_eval.py`.
+    retrieval_k: int = 4
+    retrieval_max_distance: float = 0.6
+
+    # Agente: tetto ai giri di tool calling per singola richiesta
+    agent_max_steps: int = 4
+
     # Sessione
     session_secret: str = "change-me-in-production"
+    session_ttl_seconds: int = 28800
+
+    # Origini ammesse per il widget (CORS), separate da virgola
+    cors_origins: str = "http://localhost:8080,http://localhost:8000"
 
     @property
     def wc_signing_base(self) -> str:
         """Base URL per la firma OAuth (fallback su wc_base_url se non impostato)."""
         return self.wc_sign_url or self.wc_base_url
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 settings = Settings()
