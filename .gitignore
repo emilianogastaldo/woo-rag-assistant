@@ -38,3 +38,6 @@ Thumbs.db
 # --- Node / widget ---
 node_modules/
 dist-widget/
+
+# Report eval locali: metriche aggregate e per domanda, mai committati automaticamente.
+evals/results/

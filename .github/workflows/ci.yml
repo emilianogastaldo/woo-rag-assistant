@@ -25,7 +25,18 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Lint (ruff)
-        run: ruff check .
+        run: ruff check . ../evals --config pyproject.toml
 
       - name: Test (pytest)
         run: pytest -q
+
+      - name: Eval deterministici (rete bloccata dal runner)
+        run: PYTHONPATH=..:. python -m evals.run_agent_eval --output ../evals/results/ci.json
+
+      - name: Report eval senza payload o segreti
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-eval
+          path: evals/results/ci.json
+          if-no-files-found: ignore
