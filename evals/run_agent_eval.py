@@ -20,12 +20,19 @@ from app import agent  # noqa: E402
 from app.agent import AgentResult, AgentTrace, answer, build_toolset  # noqa: E402
 from app.auth.session import Session  # noqa: E402
 from app.config import settings  # noqa: E402
-from app.rag.chain import KnowledgeBase  # noqa: E402
 from app.tools.catalog import CatalogService  # noqa: E402
 from app.tools.orders import OrderService  # noqa: E402
-from evals.fixtures import AS_OF, FakeStore, FakeWoo, FrozenDate, ScriptedLLM  # noqa: E402
+from evals.fixtures import (  # noqa: E402
+    AS_OF,
+    FakeStore,
+    FakeWoo,
+    FrozenDate,
+    ScriptedLLM,
+    documents,
+)
 from evals.metrics import (  # noqa: E402
     SCHEMA_VERSION,
+    RecordingKnowledgeBase,
     RecordingStore,
     aggregate,
     compare,
@@ -45,15 +52,16 @@ def estimate(case_count, repeats, max_steps):
         "repeats": repeats,
         "turns": turns,
         "generation_requests_max": turns * max_steps,
-        "embedding_requests_max": 1 + turns * max_steps,
+        "embedding_requests_max": 1 + turns * max_steps * (1 + settings.retrieval_retry_attempts),
         "generation_output_tokens_max": turns * max_steps * 512,
         "corpus_embedding_requests": 1,
         "retries": 0,
+        "retrieval_retries_max": turns * max_steps * settings.retrieval_retry_attempts,
         "note": "Cost depends on input/output and embedding tokens and provider prices. No judge.",
     }
 
 
-async def evaluate(cases, repeats=1, live=False, allow_external=False):
+async def evaluate(cases, repeats=1, live=False, allow_external=False, commit=None):
     # La guardia esiste anche nell'API Python, non solo nel parser CLI.
     if live and not allow_external:
         raise ValueError("live evaluation requires explicit --allow-external")
@@ -73,6 +81,7 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False):
             for repeat in range(1, repeats + 1):
                 trace = AgentTrace()
                 retrieval = RecordingStore(store)
+                retrieval.corpus = documents()
                 woo = FakeWoo()
                 session = (
                     Session(email="synthetic@example.invalid", customer_id=101)
@@ -81,7 +90,7 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False):
                 )
                 toolset = build_toolset(
                     session,
-                    knowledge_base=KnowledgeBase(store=retrieval),
+                    knowledge_base=RecordingKnowledgeBase(store=retrieval),
                     catalog=CatalogService(client=woo),
                     order_service=OrderService(customer_id=101, client=woo),
                 )
@@ -113,6 +122,7 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False):
                 rows.append(row)
     return {
         "schema_version": SCHEMA_VERSION,
+        "commit": commit,
         "mode": "live-synthetic" if live else "offline-scripted",
         "dataset_digest": digest([c.model_dump() for c in cases]),
         "fixture_digest": digest((HERE / "fixtures.py").read_text()),
@@ -126,6 +136,7 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False):
         ),
         "repeats": repeats,
         "config": {
+            **{f"retrieval_{key}": value for key, value in settings.retrieval.model_dump().items()},
             "retrieval_k": settings.retrieval_k,
             "retrieval_max_distance": settings.retrieval_max_distance,
             "agent_max_steps": settings.agent_max_steps,
@@ -154,6 +165,9 @@ def main(argv=None):
     parser.add_argument("--golden", type=Path, default=HERE / "golden.jsonl")
     parser.add_argument("--output", type=Path, default=HERE / "results" / "latest.json")
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument(
+        "--commit", help="Git commit of the evaluated tree (implementation hash also saved)",
+    )
     args = parser.parse_args(argv)
     if args.repeats < 1:
         parser.error("--repeats must be positive")
@@ -185,7 +199,9 @@ def main(argv=None):
             keys = [(r["id"], r["repeat"]) for r in baseline["rows"]]
             if sorted(keys) != sorted((r["id"], r["repeat"]) for r in expected["rows"]):
                 raise ValueError("incompatible baseline cases")
-        report = asyncio.run(evaluate(cases, args.repeats, args.live, args.allow_external))
+        report = asyncio.run(evaluate(
+            cases, args.repeats, args.live, args.allow_external, args.commit,
+        ))
         if baseline:
             report["comparison"] = compare(baseline, report)
         args.output.parent.mkdir(parents=True, exist_ok=True)
