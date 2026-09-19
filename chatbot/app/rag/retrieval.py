@@ -112,6 +112,19 @@ def evidence_gate(item: Candidate, query: str, config: RetrievalConfig) -> str:
     return "rejected"
 
 
+def retry_supported(item: Candidate, query: str, config: RetrievalConfig) -> bool:
+    """A compressed query must not admit a passage on new cosine similarity alone.
+
+    Require coverage of the rewritten terms, preserving unknown constraints and
+    negatives. This intentionally trades retry recall for conservative abstention.
+    """
+    query_terms = set(tokenize(query))
+    terms = set(tokenize(searchable_text(item.document)))
+    return bool(query_terms) and code_tokens(query) <= terms and (
+        len(query_terms & terms) / len(query_terms) >= config.lexical_min_coverage
+    )
+
+
 def reformulate(query: str) -> str:
     """One conservative, local rewrite. Preserve all codes, numbers and negatives.
 

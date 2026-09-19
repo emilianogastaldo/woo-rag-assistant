@@ -172,6 +172,21 @@ async def test_retry_does_not_register_rejected_passages_for_citations():
     assert result.reply == UNCITED_REPLY and result.sources == []
 
 
+async def test_retry_cannot_relax_abstention_using_compressed_query_similarity():
+    docs = chunks("Spedizione standard in Italia.")
+
+    class Store(VectorStore):
+        async def asimilarity_search_with_score(self, query, k=4):
+            # The compression crosses the cosine threshold, as observed in the
+            # authorized smoke. The passage still does not answer the question.
+            return [(docs[0], .7 if "sulla" in query else .3)]
+
+    kb = KnowledgeBase(Store(docs), config=RetrievalConfig(strategy="hybrid", retry_attempts=1))
+    result = await kb.search("Spedizione sulla Luna con garanzia meteoriti")
+    assert not result.found and len(result.attempts) == 2
+    assert result.attempts[1].candidates[0].evidence == "retry_unsupported"
+
+
 async def test_independent_citation_audit_accepts_lexical_not_fused_distance():
     store = RecordingStore(VectorStore())
     store.config = RetrievalConfig(strategy="hybrid")

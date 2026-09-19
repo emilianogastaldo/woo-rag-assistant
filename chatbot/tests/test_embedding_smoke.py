@@ -58,6 +58,12 @@ async def test_smoke_python_consent_and_one_batch_shared_across_strategies(monke
     assert report["provider"]["embedding_tokens_measured"] == 800
     assert report["provider"]["cost_usd_estimated_from_measured_tokens"] == 0.000016
     assert len({r["id"] for r in report["rows"]}) == 6
+    replayed = await smoke.replay(report)
+    assert len(calls) == 1
+    assert replayed["provider"]["embedding_requests"] == 0
+    assert replayed["mode"] == "offline-recorded-embedding-scores"
+    with pytest.raises(ValueError, match="incompatible"):
+        await smoke.replay({**report, "corpus_digest": "changed"})
 
 
 async def test_budget_exceeded_before_any_provider_call(monkeypatch):

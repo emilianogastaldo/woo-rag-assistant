@@ -26,6 +26,7 @@ from app.rag.retrieval import (
     query_digest,
     rank_candidates,
     reformulate,
+    retry_supported,
 )
 from app.rag.store import get_vector_store
 
@@ -97,8 +98,7 @@ class KnowledgeBase:
         attempts = []
         active_query = query
         for number in range(config.retry_attempts + 1):
-            attempt = await self._attempt(active_query, config, index)
-            attempt.reformulated = number > 0
+            attempt = await self._attempt(active_query, config, index, is_retry=number > 0)
             attempt.timings_ms["snapshot_bm25_build"] = snapshot_ms if number == 0 else 0.0
             attempts.append(attempt)
             if attempt.selected_ids or number == config.retry_attempts:
@@ -131,7 +131,7 @@ class KnowledgeBase:
             context="\n\n---\n\n".join(blocks) or NO_RESULTS, chunks=chunks, attempts=attempts,
         )
 
-    async def _attempt(self, query, config, index) -> RetrievalAttempt:
+    async def _attempt(self, query, config, index, *, is_retry=False) -> RetrievalAttempt:
         timings = {}
         started = time.perf_counter()
         # Semantic-only keeps the pre-issue-4 query size and threshold behavior.
@@ -154,6 +154,8 @@ class KnowledgeBase:
         started = time.perf_counter()
         for item in candidates:
             item.evidence = evidence_gate(item, query, config)
+            if is_retry and not retry_supported(item, query, config):
+                item.evidence = "retry_unsupported"
             item.accepted = item.evidence in {"cosine", "lexical"}
         selected = [item for item in candidates if item.accepted][:config.k]
         timings["evidence_gate"] = (time.perf_counter() - started) * 1000
@@ -168,4 +170,5 @@ class KnowledgeBase:
         return RetrievalAttempt(
             query_digest=query_digest(query), strategy=config.strategy, candidates=candidates,
             selected_ids=[c.chunk_id for c in selected], timings_ms=timings, adequacy=adequacy,
+            reformulated=is_retry,
         )

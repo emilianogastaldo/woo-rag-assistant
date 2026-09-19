@@ -9,7 +9,8 @@ import time
 from pathlib import Path
 
 from app.config import settings
-from app.rag.retrieval import reformulate
+from app.rag.retrieval import query_digest, reformulate
+from evals.metrics import digest
 from evals.network import offline_network
 from evals.retrieval_fixtures import CASES, VectorStore, corpus
 from evals.run_retrieval_eval import evaluate_retrieval
@@ -86,6 +87,56 @@ class CachedEmbeddings:
         return self.cache[query]
 
 
+class RecordedScoresStore(VectorStore):
+    """Replay complete measured cosine rankings; BM25/gates run again locally.
+
+    This is a regression replay, not another real-embedding/ANN measurement.
+    Partial candidate lists are rejected rather than fabricating missing scores.
+    """
+
+    def __init__(self, docs, report):
+        self.docs = docs
+        documents = {d.metadata["chunk_id"]: d for d in docs}
+        self.rankings = {}
+        for row in report["rows"]:
+            for attempt in row["attempts"]:
+                hits = sorted([c for c in attempt["candidates"] if c["semantic_rank"] is not None],
+                              key=lambda c: c["semantic_rank"])
+                if {c["chunk_id"] for c in hits} != documents.keys():
+                    continue
+                self.rankings[attempt["query_digest"]] = [
+                    (documents[c["chunk_id"]], c["cosine_distance"]) for c in hits
+                ]
+
+    async def asimilarity_search_with_score(self, query, k=4):
+        return self.rankings[query_digest(query)][:k]
+
+
+async def replay(report, commit=None):
+    docs, cases, _, _ = plan()
+    if (report.get("mode") != "live-embedding-smoke" or report.get("schema_version") != 1
+            or report.get("dataset_digest") != digest(cases)
+            or report.get("corpus_digest") != digest([(d.page_content, d.metadata) for d in docs])):
+        raise ValueError("incompatible smoke recording")
+    with offline_network():
+        result = await evaluate_retrieval(
+            RecordedScoresStore(docs, report), docs, cases=cases, repeats=1,
+            commit=commit, mode="offline-recorded-embedding-scores",
+        )
+    result["replayed_from"] = {"report_digest": digest(report), "commit": report["commit"]}
+    result["scope"] = "Offline replay of measured cosine scores; no new provider/vector/ANN run."
+    result["provider"] = {"embedding_requests": 0, "generation_calls": 0, "cost_usd": 0}
+    old_rows = {(r["variant"], r["id"]): r for r in report["rows"]}
+    result["changes_from_recording"] = [{
+        "variant": row["variant"], "id": row["id"],
+        "before_failure": old_rows[(row["variant"], row["id"])]["failure"],
+        "after_failure": row["failure"],
+        "before_metrics": old_rows[(row["variant"], row["id"])]["metrics"],
+        "after_metrics": row["metrics"],
+    } for row in result["rows"]]
+    return result
+
+
 async def smoke(*, allow_external=False, max_cost_usd=0.001, commit=None):
     if not allow_external:
         raise ValueError("explicit --allow-external required")
@@ -117,19 +168,28 @@ def main(argv=None):
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--allow-external", action="store_true")
     parser.add_argument("--estimate", action="store_true")
+    parser.add_argument("--replay", type=Path, help="offline replay of complete measured rankings")
     parser.add_argument("--max-cost-usd", type=float, default=0.001)
     parser.add_argument("--commit")
     parser.add_argument("--output", type=Path, default=Path("/results/embedding-smoke.json"))
     args = parser.parse_args(argv)
-    if not args.estimate and not (args.live and args.allow_external):
+    if args.replay and (args.live or args.allow_external or args.estimate):
+        parser.error("--replay cannot be combined with live/estimate flags")
+    if args.replay and args.replay.resolve() == args.output.resolve():
+        parser.error("replay output must not overwrite its source")
+    if not args.replay and not args.estimate and not (args.live and args.allow_external):
         parser.error("requires --live --allow-external")
     try:
         if args.estimate:
             print(json.dumps(plan(args.max_cost_usd)[3], indent=2))
             return 0
-        report = asyncio.run(asyncio.wait_for(smoke(
-            allow_external=args.allow_external, max_cost_usd=args.max_cost_usd, commit=args.commit,
-        ), timeout=60))
+        if args.replay:
+            report = asyncio.run(replay(json.loads(args.replay.read_text()), args.commit))
+        else:
+            report = asyncio.run(asyncio.wait_for(smoke(
+                allow_external=args.allow_external, max_cost_usd=args.max_cost_usd,
+                commit=args.commit,
+            ), timeout=60))
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n")
     except Exception:

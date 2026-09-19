@@ -154,6 +154,12 @@ def admitted_documents(retrieval):
                          >= config.lexical_min_coverage)
             else:
                 valid = False
+            if final.reformulated:
+                query_terms, codes = retrieval.query_terms[final.query_digest]
+                terms = set(tokenize(searchable_text(item.document)))
+                valid = valid and bool(query_terms) and codes <= terms and (
+                    len(query_terms & terms) / len(query_terms) >= config.lexical_min_coverage
+                )
             if valid:
                 documents.append(item.document)
     return documents
