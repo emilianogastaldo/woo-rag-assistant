@@ -91,7 +91,7 @@ il numero massimo di chiamate rimane invariato, il costo per risposta può aumen
 | `hit_at_k`, `mrr` | Presenza e rango reciproco della fonte attesa nel primo retrieval reale della domanda, prima della soglia; k è nella configurazione. Mancato retrieval con fonte attesa vale zero. |
 | `citation_precision` | Fonti strutturate corrette e sostenute da ID citati validi / fonti strutturate uniche restituite; riconoscimento da SKU o titolo. Zero se manca una fonte richiesta, `null` se non è richiesta e non ci sono citazioni. |
 | `citation_recall` | Presenza della fonte richiesta, per impedire che omettere tutte le fonti migliori la precisione. |
-| `citation_validity` | Gli ID nel testo coincidono con quelli attribuiti in `sources`, sono recuperati sotto soglia nel turno e corrispondono ai metadati della fonte. Una fonte attesa richiede almeno un ID; senza fonte attesa non devono esserci citazioni. |
+| `citation_validity` | Gli ID nel testo coincidono con quelli attribuiti in `sources`, sono ammessi dai gate nel turno e corrispondono ai metadati della fonte. Coseno e BM25 sono verificati separatamente, mai confrontando RRF con la soglia coseno. Una fonte attesa richiede almeno un ID; senza fonte attesa non devono esserci citazioni. |
 | `answer_correct` | Tutte le regex `answer_all` trovate e nessuna `answer_none`. Le regex includono fatti, astensioni, invito al login e divieti di divulgazione. |
 | `abstention_correct` | Stesso controllo nei soli casi `abstain`, `decline`, `login`, `not_found`; `null` negli altri. |
 | `latency_ms` | Durata del singolo `answer()`, include modello/tool; setup del corpus separato. |
@@ -121,7 +121,8 @@ l'hash delle fixture. Baseline della #3/schema 1 vengono intenzionalmente rifiut
 rigenerare una baseline con questo schema per successivi confronti automatici.
 Per la migrazione confrontare separatamente i 30 casi invariati e i contatori;
 non alterare gli hash per far accettare report incompatibili. Nessun contenuto
-dei chunk, ID di chunk o testo delle risposte viene aggiunto ai report.
+dei chunk o testo delle risposte viene aggiunto ai report. Dalla #4 la diagnostica
+include gli ID opachi dei chunk, i punteggi tipizzati e gli hash delle query.
 
 Il JSON versionato salva ID, ripetizione, strada/tool da un vocabolario chiuso,
 metriche, hash del dataset/fixture/implementazione e configurazione. I nomi modello
@@ -152,3 +153,112 @@ docker compose run --rm -v "$PWD/evals:/evals:ro" ingest \
 
 Lo sweep precedente stampa hit@1/3/5, MRR e distanze; i report JSON prima/dopo sono
 forniti dal nuovo runner dell'agente. Non eseguire ingestion o il live in CI.
+
+## Issue #4: strategie effettive e classificazione dei failure
+
+La baseline `issue-4-before.json` è stata prodotta dalla main `fa7e52a` dopo #2/#3,
+prima di modificare il codice: schema 2, golden e fixture invariati, 30×3 casi.
+`issue-4-after.json --baseline ...` è confrontabile direttamente: la #4 aggiunge
+campi diagnostici, ma non cambia il contratto delle metriche schema 2. `commit`
+può essere passato con `--commit`; l'hash dell'implementazione identifica sempre
+il contenuto eseguito. I vecchi fixture/schema incompatibili continuano a fallire.
+La baseline salvata è stata arricchita solo con commit/comando di provenienza.
+
+`FakeStore` continua a verificare il loop dell'agente; il suo 100% non misura
+la qualità del retrieval. Usare il benchmark distinto `retrieval-ablation`,
+schema 1 proprio (non confrontabile tramite `compare` con l'agent schema 2):
+
+```bash
+docker compose run --rm --no-deps eval-offline python -m evals.run_retrieval_eval \
+  --repeats 3 --output /evals/results/issue-4-retrieval-offline.json
+python3 evals/run_local_integration.py
+```
+
+Il primo comando calcola davvero distanze/BM25/RRF, senza rete. Il secondo fa
+upsert/lettura/query/delete su **Chroma 1.0.0 reale**, fissato per digest, con gli
+stessi 12 chunk e 16 casi (6 configurazioni × 16 × 3 = 288 esecuzioni). Il progetto
+Compose, collection, rete e volume sono univoci; nessuna porta pubblicata, `.env`
+escluso, credenziali sintetiche, rete interna e allowlist socket `chroma:8000`.
+L'harness verifica la configurazione effettiva e registra nomi/digest/cleanup in
+`evals/results/woo-issue4-<run>/inventory.json`. Non usa né ferma la demo.
+Serve l'immagine backend già costruita; `pull_policy: never` separa esplicitamente
+download/build ed esecuzione locale. L'harness host deve poter scrivere in
+`evals/results/` (se creato da un container root, assegnare la directory al proprio UID).
+
+I vettori locali sono bag of concepts con codici intenzionalmente ignorati,
+senza tabella query→ranking. Il modello locale inoltra la query effettiva al tool
+e cita i passaggi restituiti; non consulta le attese. Il caso misto usa `OrderService`
+reale con Woo sintetico. Queste prove non misurano routing/generazione di un LLM.
+
+Le configurazioni variano **una leva per volta**: semantic; hybrid (12 candidati,
+RRF 60, pesi 1/1); hybrid con 4 candidati; RRF 20; peso lessicale 2; un retry.
+`comparison` confronta ogni variante con semantic e con il proprio parent,
+segnalando per domanda regressioni qualitative, incremento chiamate e latenza.
+Non si sceglie automaticamente il default dal miglior punteggio.
+
+Ogni tentativo riporta tutti i candidati ottenuti (non il ranking dell'intero
+corpus oltre il limite), ranghi semantico/BM25/fuso, distanza coseno, score BM25/RRF,
+motivo del gate, ID del contesto finale e posizione del chunk atteso.
+`first_hit_at_k`/`first_mrr` misurano il **contesto ammesso al primo tentativo**;
+`final_*` il contesto dopo retry. Sono volutamente distinti dalle metriche agent
+v2 che misurano il primo ranking prima del gate. Assessor e gate rifiutati non
+autorizzano citazioni; il report conserva anche quei tentativi.
+
+`failure`: `corpus_miss`, `retrieval_miss`, `ranking_miss`,
+`generation/citation_miss` oppure `none`; definizioni in DEC-012. Per un caso
+senza fonte attesa, una risposta documentale indebita è generation/citation miss.
+Il campo è una diagnosi sul golden, non una prova semantica automatica.
+
+`second_stage_ms` comprende lettura snapshot/costruzione BM25, ranking lessicale,
+fusione, gate, riformulazione e assessor locale; `retry_ms` isola la durata del
+secondo tentativo (la riformulazione è nel primo). I tempi di ciascuno stadio sono
+anche separati. Nel locale, embedding/modello/Woo sono adapter: chiamate provider,
+token provider e costo provider zero. I contatori del modello locale non sono
+richieste OpenAI. Il costo computazionale locale non è monetizzato.
+
+## Smoke con embedding veri e budget limitato
+
+Richiede consenso separato. Il runner `run_embedding_smoke` fissa modello
+`text-embedding-3-small`, sei casi, una ripetizione, 12 documenti sintetici e al
+massimo un batch con le query e le eventuali riformulazioni. Niente LLM generativo,
+judge, Woo reale o Chroma. I vettori identici vengono riutilizzati tra strategie;
+una cache miss fallisce senza chiamare il provider. Retry SDK zero, 30 s/richiesta,
+60 s/run. Il conteggio conservativo dei byte UTF-8 limita l'input a 12.000 token
+byte-BPE (8.000 per stringa); la spesa massima approvabile è $0,001.
+Il batch attuale contiene al massimo 1.723 token con questo limite conservativo.
+
+Tariffa verificata il 19/09/2026: $0,02/milione di token input
+([OpenAI](https://developers.openai.com/api/docs/models/text-embedding-3-small)).
+Il report distingue token misurati e costo **stimato** da tariffa, non fatturato;
+le latenze delle strategie escludono il batch condiviso, misurato in `provider`.
+Prima di riusare il runner in futuro verificare nuovamente la tariffa.
+
+```bash
+# Nessuna rete, nessuna chiave richiesta
+docker compose run --rm --no-deps eval-offline python -m evals.run_embedding_smoke --estimate
+# Solo DOPO consenso per questa specifica esecuzione; usare un nome progetto nuovo
+docker compose --env-file .env -f evals/compose.smoke.yml -p woo-issue4-smoke-UNIQUE \
+  run --rm --no-deps smoke python -m evals.run_embedding_smoke \
+  --live --allow-external --max-cost-usd 0.001 --output /results/issue-4-embedding-smoke.json
+docker compose --env-file .env -f evals/compose.smoke.yml -p woo-issue4-smoke-UNIQUE down
+```
+
+Lo smoke Compose riceve solo la chiave necessaria, senza montare `.env` nel
+container; è separato dalla rete demo. Il suo comando predefinito è una stima,
+non un'esecuzione live. Budget completo 30×3, ulteriori richieste o nuovi dati
+richiedono nuova autorizzazione.
+
+Per verificare una correzione senza ripagare gli embedding si possono rigiocare
+**i punteggi completi registrati**, distinguendo chiaramente il livello di prova:
+
+```bash
+docker compose run --rm --no-deps eval-offline python -m evals.run_embedding_smoke \
+  --replay /evals/results/issue-4-embedding-smoke.json \
+  --output /evals/results/issue-4-embedding-replay.json
+```
+
+Il replay valida schema/modalità, dataset e corpus, rifiuta query prive di ranking
+completo e ricalcola BM25/fusione/gate. Non aggiorna vettori, non riprova Chroma,
+non effettua chiamate esterne e non sovrascrive la registrazione originale.
+Risultati, regressione trovata nel retry e decisione finale in
+[`docs/issue-4-results.md`](../docs/issue-4-results.md).

@@ -31,6 +31,36 @@ Widget chat (JS) → Backend FastAPI → { ChromaDB | OpenAI | WooCommerce REST 
 
 Le decisioni di design sono in [`docs/architecture.md`](docs/architecture.md).
 
+## Hybrid retrieval e diagnostica
+
+`RETRIEVAL_STRATEGY=hybrid` abilita BM25 + ricerca semantica con Reciprocal Rank
+Fusion. BM25 legge i chunk correnti da Chroma, usando testo, titolo e SKU, e
+conserva gli stessi ID della pipeline di ingestion. Non richiede un secondo
+indice persistente né la reindicizzazione della demo per attivarlo su record #2.
+
+Il default resta **`semantic`**, `k=4`, soglia coseno `0.6`, senza retry: i test
+locali misurano la correttezza dei meccanismi, non la qualità degli embedding in
+produzione. Nessun MMR/reranker è attivato senza evidenze. Parametri di candidati,
+RRF, BM25 e gate lessicale sono espliciti in `.env.example` e passati dal Compose
+al backend. `RETRIEVAL_RETRY_ATTEMPTS=1` consente al massimo una riformulazione
+locale dopo retrieval senza evidenza; il default è `0`.
+
+Gli eval distinguono corpus miss, retrieval miss, ranking miss e generation/citation
+miss, con chunk atteso, candidati, ranghi/punteggi per canale, contesto ammesso,
+primo tentativo e retry separati. Il punteggio RRF **non è una distanza** e non
+viene confrontato con la soglia coseno. La copertura lessicale è un'euristica:
+un passaggio recuperato o citato non prova da solo che contenga la risposta.
+
+```bash
+# Benchmark delle strategie con vettori locali, senza rete/provider
+docker compose run --rm --no-deps eval-offline python -m evals.run_retrieval_eval
+# Chroma reale isolato, adattatori locali, rete interna e cleanup del solo test
+python3 evals/run_local_integration.py
+```
+
+Risultati, limiti e smoke opzionale con embedding veri:
+[`evals/README.md`](evals/README.md) e [`report issue #4`](docs/issue-4-results.md).
+
 ## Citazioni verificabili
 
 Ogni chunk riceve un ID `chunk-v1-<sha256>` deterministico da URL, titolo, tipo,
