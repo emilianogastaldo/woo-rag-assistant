@@ -78,13 +78,19 @@ cui viene verificata.
 Scenari da provare (elencati anche nella pagina di demo). I numeri d'ordine sono
 quelli stampati da `seed/setup.sh`: se nel tuo ambiente differiscono, sostituiscili.
 
+Per il caso di reso il tool calcola la scadenza di 30 giorni solo dalla **data di
+consegna verificata** presente nel tracking (`_wrag_delivery_date`). La data di
+completamento WooCommerce è mostrata separatamente e non prova la consegna; se il
+tracking non fornisce la data, il bot non determina la scadenza e invita a contattare
+l'assistenza.
+
 | # | Sessione | Domanda | Atteso |
 | --- | --- | --- | --- |
 | 1 | ospite | «Quanto costa la spedizione standard?» | RAG con fonti |
 | 2 | ospite | «A che punto è il mio ordine 22?» | declino, invito ad accedere |
 | 3 | Mario | «A che punto è il mio ordine 22?» | tool ordini |
 | 4 | Mario | ordine di Luigi | «ordine non trovato» |
-| 5 | Mario | «Posso ancora restituire l'ordine 21?» | tool + RAG |
+| 5 | Mario | «Posso ancora restituire l'ordine 21?» | tool + RAG; scadenza dai 30 giorni dalla consegna verificata |
 | 6 | qualsiasi | «Che tempo farà domani?» | fuori dominio, declina |
 
 ## Sviluppo

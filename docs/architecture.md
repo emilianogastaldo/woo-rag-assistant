@@ -153,3 +153,21 @@ Le quantità a magazzino non vengono indicizzate: nel vector store sarebbero cor
 solo fino alla vendita successiva. La disponibilità passa dal tool catalogo, che legge
 le API al momento della domanda. Nel RAG finisce solo la conoscenza che cambia di rado
 (descrizioni, policy, FAQ).
+
+### DEC-008 — La consegna è un dato di tracking esplicito
+WooCommerce espone `date_completed`, che indica il completamento amministrativo
+dell'ordine ma non certifica che il corriere abbia consegnato il pacco. Il tool ordini
+la restituisce quindi con l'etichetta **Data completamento** e non la usa mai per
+calcolare un reso.
+
+La fonte scelta per la demo è il metadata ordine `_wrag_delivery_date`, popolato
+dall'integrazione di tracking soltanto alla conferma del corriere e salvato in ISO 8601.
+Il tool accetta esclusivamente quel metadata valido come **Data consegna verificata**.
+Se manca o non è leggibile, riporta esplicitamente che la scadenza del reso non è
+calcolabile con certezza; non stima la data dal completamento o dallo stato `completed`.
+Quando la data è disponibile, il tool calcola la scadenza aggiungendo 30 giorni a
+quella data, in linea con la policy di reso.
+
+Il seed assegna questo metadata all'ordine demo completato di Mario e applica una
+piccola migrazione idempotente (`wrag_seed_delivery_date_v1`) per gli ambienti seed
+creati prima dell'introduzione della convenzione.

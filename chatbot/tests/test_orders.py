@@ -57,8 +57,28 @@ async def test_elenco_ordini_scarta_ordini_non_del_cliente():
     assert "Ordine #23" not in result
 
 
-async def test_data_completamento_esposta_per_il_caso_reso():
-    """Il caso misto (posso ancora rendere?) ha bisogno della data di consegna."""
+async def test_reso_calcolato_solo_da_data_consegna_verificata():
+    """I 30 giorni decorrono dal metadata di tracking, non dal completamento."""
+    woo = FakeWooClient(
+        {
+            "orders": [
+                make_order(
+                    21,
+                    CUSTOMER_A,
+                    status="completed",
+                    date_completed="2026-06-20T10:15:00",
+                    meta_data=[{"key": "_wrag_delivery_date", "value": "2026-06-22T14:30:00Z"}],
+                )
+            ]
+        }
+    )
+    result = await OrderService(CUSTOMER_A, client=woo).get_order(21)
+    assert "Data completamento: 20/06/2026" in result
+    assert "Data consegna verificata: 22/06/2026" in result
+    assert "Scadenza reso (30 giorni dalla consegna verificata): 22/07/2026" in result
+
+
+async def test_sola_data_completamento_non_prova_la_consegna_ne_calcola_il_reso():
     woo = FakeWooClient(
         {
             "orders": [
@@ -71,5 +91,10 @@ async def test_data_completamento_esposta_per_il_caso_reso():
             ]
         }
     )
+
     result = await OrderService(CUSTOMER_A, client=woo).get_order(21)
-    assert "20/06/2026" in result
+
+    assert "Data completamento: 20/06/2026" in result
+    assert "Data consegna verificata: non disponibile" in result
+    assert "Scadenza reso: non calcolabile" in result
+    assert "20/07/2026" not in result

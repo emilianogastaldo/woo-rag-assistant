@@ -112,12 +112,14 @@ wrag_log( '== Ordini ==' );
 if ( get_option( 'wrag_seed_orders_done' ) ) {
 	wrag_log( '  (gia presenti, salto)' );
 } else {
-	// Cliente A: ordine completato ~25 giorni fa (utile per scenario reso).
+	// Cliente A: ordine completato con consegna verificata (scenario reso).
 	$specs = array(
 		array(
 			'customer' => 'A',
 			'status'   => 'completed',
 			'date'     => '2026-06-20 10:15:00',
+			// Scritto dall'integrazione tracking solo alla conferma del corriere.
+			'delivery_date' => '2026-06-22T14:30:00Z',
 			'items'    => array( array( 'TSHIRT-BIO', 2 ), array( 'BOTTLE-THERMO', 1 ) ),
 		),
 		// Cliente A: secondo ordine in lavorazione (spedizione in corso).
@@ -155,10 +157,32 @@ if ( get_option( 'wrag_seed_orders_done' ) ) {
 		$order->set_date_created( $s['date'] );
 		$order->calculate_totals();
 		$order->set_status( $s['status'] );
+		if ( ! empty( $s['delivery_date'] ) ) {
+			$order->update_meta_data( '_wrag_delivery_date', $s['delivery_date'] );
+		}
 		$order->save();
 		wrag_log( sprintf( '  + ordine #%d cliente %s (%s)', $order->get_id(), $s['customer'], $s['status'] ) );
 	}
 	update_option( 'wrag_seed_orders_done', 1 );
+}
+
+// Aggiorna anche un ambiente seed già esistente: il primo ordine completato di
+// Mario è quello usato dalla demo reso e ottiene la data del tracking verificato.
+if ( ! get_option( 'wrag_seed_delivery_date_v1' ) && ! empty( $customer_ids['A'] ) ) {
+	$completed_orders = wc_get_orders(
+		array(
+			'customer_id' => $customer_ids['A'],
+			'status'      => 'completed',
+			'limit'       => 1,
+			'orderby'     => 'date',
+			'order'       => 'ASC',
+		)
+	);
+	if ( ! empty( $completed_orders ) ) {
+		$completed_orders[0]->update_meta_data( '_wrag_delivery_date', '2026-06-22T14:30:00Z' );
+		$completed_orders[0]->save();
+	}
+	update_option( 'wrag_seed_delivery_date_v1', 1 );
 }
 
 /* -------------------------------------------------------------------------

@@ -41,6 +41,11 @@ Regole vincolanti:
   indirizzi o emettere rimborsi. Per queste richieste indirizza all'assistenza.
 - Se una domanda richiede sia i dati di un ordine sia una policy del negozio,
   usa entrambi gli strumenti prima di rispondere.
+- Per stabilire la scadenza di un reso usa esclusivamente la "Data consegna
+  verificata" o la relativa scadenza restituita dal tool ordini. La data di
+  completamento non prova l'avvenuta consegna. Se il tool indica che la data non
+  è disponibile, spiega che non puoi stabilire con certezza la scadenza e invita
+  il cliente a contattare l'assistenza.
 """
 
 AUTHENTICATED_PROMPT = """
@@ -170,7 +175,8 @@ def build_toolset(
             name="stato_ordine",
             description=(
                 "Recupera stato, date e articoli di un ordine del cliente collegato alla "
-                "sessione, dato il numero d'ordine."
+                "sessione, dato il numero d'ordine. Per i resi, considera solo la data di "
+                "consegna verificata e la relativa scadenza, mai la data di completamento."
             ),
             args_schema=StatoOrdine,
         )

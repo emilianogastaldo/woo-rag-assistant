@@ -38,6 +38,7 @@ def make_order(order_id: int, customer_id: int, **overrides: Any) -> dict:
         "total": "59.00",
         "date_created": "2026-07-11T09:30:00",
         "date_completed": None,
+        "meta_data": [],
         "line_items": [{"name": "Zaino Urban", "quantity": 1, "sku": "BACKPACK-URBAN"}],
     }
     order.update(overrides)
