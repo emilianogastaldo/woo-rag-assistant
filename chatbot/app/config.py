@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     # la soglia va calibrata con `evals/run_eval.py`.
     retrieval_k: int = 4
     retrieval_max_distance: float = 0.6
+    chunk_size: int = 800
+    chunk_overlap: int = 120
 
     # Agente: tetto ai giri di tool calling per singola richiesta
     agent_max_steps: int = 4

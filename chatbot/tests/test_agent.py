@@ -110,7 +110,9 @@ async def test_risposta_rag_raccoglie_le_fonti_dai_metadati():
     kb = FakeKnowledgeBase(
         RetrievalResult(
             context="La spedizione standard costa 4,90 €.",
-            sources=[Source(title="Spedizioni", url="http://x/spedizioni", type="page")],
+            chunks={
+                "chunk-test": Source(title="Spedizioni", url="http://x/spedizioni", type="page"),
+            },
         )
     )
     toolset = anon_toolset(knowledge_base=kb)
@@ -125,11 +127,14 @@ async def test_risposta_rag_raccoglie_le_fonti_dai_metadati():
                 }
             ],
         ),
-        AIMessage(content="La spedizione standard costa 4,90 €."),
+        AIMessage(content="La spedizione standard costa 4,90 €. [chunk-test]"),
     )
     result = await answer("quanto costa la spedizione?", session=None, toolset=toolset, llm=llm)
     assert "4,90" in result.reply
-    assert result.sources == [{"title": "Spedizioni", "url": "http://x/spedizioni", "type": "page"}]
+    assert result.sources == [{
+        "title": "Spedizioni", "url": "http://x/spedizioni", "type": "page",
+        "chunk_ids": ["chunk-test"],
+    }]
     assert result.tools_used == ["cerca_informazioni_negozio"]
     assert kb.queries == ["costo spedizione"]
 

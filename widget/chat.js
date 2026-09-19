@@ -42,6 +42,7 @@
   .wrag-msg{max-width:85%;padding:9px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
   .wrag-msg.user{align-self:flex-end;background:#7f54b3;color:#fff;border-bottom-right-radius:4px}
   .wrag-msg.bot{align-self:flex-start;background:#f1f0f5;border-bottom-left-radius:4px}
+  .wrag-msg.bot a{color:#7f54b3}
   .wrag-msg.error{align-self:stretch;background:#fdecea;color:#8b1a10;font-size:13px}
   .wrag-sources{align-self:flex-start;max-width:85%;font-size:12px;color:#666}
   .wrag-sources a{color:#7f54b3}
@@ -99,8 +100,35 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  function addMessage(role, text) {
-    log.appendChild(el("div", "wrag-msg " + role, text));
+  function sourceLink(source, label) {
+    // Le URL dei documenti sono dati non fidati, come il testo del modello.
+    let url;
+    try { url = new URL(source.url); } catch (_) { return el("span", null, label); }
+    if (!["http:", "https:"].includes(url.protocol)) return el("span", null, label);
+    const link = el("a", null, label);
+    link.href = url.href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.title = source.title;
+    return link;
+  }
+
+  function addMessage(role, text, sources) {
+    const node = el("div", "wrag-msg " + role);
+    const citations = new Map();
+    (sources || []).forEach(function (source, index) {
+      (source.chunk_ids || []).forEach(id => citations.set(id, { source, index }));
+    });
+    let cursor = 0;
+    for (const match of text.matchAll(/\[(chunk-v1-[a-f0-9]{64})\]/g)) {
+      const citation = citations.get(match[1]);
+      if (!citation) continue;
+      node.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+      node.appendChild(sourceLink(citation.source, "[" + (citation.index + 1) + "]"));
+      cursor = match.index + match[0].length;
+    }
+    node.appendChild(document.createTextNode(text.slice(cursor)));
+    log.appendChild(node);
     scrollDown();
   }
 
@@ -110,15 +138,7 @@
     box.appendChild(el("span", null, "Fonti: "));
     sources.forEach(function (source, index) {
       if (index) box.appendChild(document.createTextNode(" · "));
-      if (source.url) {
-        const link = el("a", null, source.title);
-        link.href = source.url;
-        link.target = "_blank";
-        link.rel = "noopener";
-        box.appendChild(link);
-      } else {
-        box.appendChild(el("span", null, source.title));
-      }
+      box.appendChild(sourceLink(source, "[" + (index + 1) + "] " + source.title));
     });
     log.appendChild(box);
     scrollDown();
@@ -193,7 +213,7 @@
       if (!response.ok) throw new Error("HTTP " + response.status);
 
       const data = await response.json();
-      addMessage("bot", data.reply);
+      addMessage("bot", data.reply, data.sources);
       addSources(data.sources);
       state.history.push({ role: "user", content: message });
       state.history.push({ role: "assistant", content: data.reply });

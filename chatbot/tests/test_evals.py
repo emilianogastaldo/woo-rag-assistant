@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage
 from app.agent import AgentResult, AgentTrace, answer, build_toolset
 from app.config import settings
 from app.rag.chain import KnowledgeBase
+from app.rag.chunks import split_documents
 from app.tools.catalog import CatalogService
 
 CASES = load_cases(HERE / "golden.jsonl")
@@ -69,22 +70,28 @@ async def test_repetitions_have_identical_quality_and_counts():
         assert first == second
 
 
-def sample_score(reply="La spedizione costa 4,90 € sotto i 49 €.", tools=None, sources=None):
+def sample_score(reply=None, tools=None, sources=None):
     case = CASES[0]
     retrieval = RecordingStore(None)
-    doc = Document(
+    doc = split_documents([Document(
         page_content="fixture",
         metadata={
             "title": "Spedizioni",
             "source": "https://demo.invalid/shipping",
+            "type": "page",
         },
-    )
+    )])[0]
+    identifier = doc.metadata["chunk_id"]
     irrelevant = Document(page_content="altro", metadata={"title": "Altro", "source": "other"})
     retrieval.results = [[(irrelevant, 0.1), (doc, 0.2)]]
     result = AgentResult(
-        reply=reply,
+        reply=(f"La spedizione costa 4,90 € sotto i 49 €. [{identifier}]"
+               if reply is None else reply),
         tools_used=[RAG] if tools is None else tools,
-        sources=[{"title": "Spedizioni", "url": "https://demo.invalid/shipping"}]
+        sources=[{
+            "title": "Spedizioni", "url": "https://demo.invalid/shipping", "type": "page",
+            "chunk_ids": [identifier],
+        }]
         if sources is None
         else sources,
     )
@@ -107,7 +114,8 @@ def test_metrics_detect_wrong_route_answer_citations_and_rank():
     assert not bad["passed"]
     assert bad["metrics"]["routing_accuracy"] == 0
     assert bad["metrics"]["answer_correct"] == 0
-    assert bad["metrics"]["citation_precision"] == 0.5
+    assert bad["metrics"]["citation_precision"] == 0
+    assert bad["metrics"]["citation_validity"] == 0
     assert sample_score(sources=[])["metrics"]["citation_recall"] == 0
 
 
@@ -132,6 +140,51 @@ async def test_empty_retrieval_and_loop_exhaustion_fail_expected_answer(monkeypa
     row = (await evaluate([CASES[0]]))["rows"][0]
     assert not row["passed"]
     assert row["metrics"]["llm_calls"] == 1
+
+
+@pytest.mark.parametrize("replacement", ["", "[chunk-inventato]"])
+async def test_eval_detects_missing_or_fabricated_text_citations(monkeypatch, replacement):
+    import re
+
+    original = ScriptedLLM.ainvoke
+
+    async def omit(self, messages):
+        result = await original(self, messages)
+        if not result.tool_calls:
+            result.content = re.sub(r"\[chunk-[^\]]+\]", replacement, result.content)
+        return result
+
+    monkeypatch.setattr(ScriptedLLM, "ainvoke", omit)
+    row = (await evaluate([CASES[0]]))["rows"][0]
+    assert not row["passed"]
+    assert row["metrics"]["hit_at_k"] == 1
+    assert row["metrics"]["citation_recall"] == 0
+    assert row["metrics"]["citation_validity"] == 0
+
+
+def test_eval_rejects_sources_without_explicit_citations_and_unattributed_ids():
+    assert sample_score(reply="4,90 € sotto 49 €")["metrics"]["citation_validity"] == 0
+    assert sample_score(sources=[])["metrics"]["citation_validity"] == 0
+
+
+async def test_eval_detects_extra_retrieved_but_uncited_source(monkeypatch):
+    from evals import run_agent_eval
+
+    original = run_agent_eval.answer
+
+    async def append_source(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        result.sources.append({
+            "title": "Resi e Rimborsi", "url": "https://demo.invalid/docs/1", "type": "page",
+            "chunk_ids": ["chunk-inventato"],
+        })
+        return result
+
+    monkeypatch.setattr(run_agent_eval, "answer", append_source)
+    row = (await evaluate([CASES[0]]))["rows"][0]
+    assert row["metrics"]["citation_precision"] == 0.5
+    assert row["metrics"]["citation_validity"] == 0
+    assert not row["passed"]
 
 
 async def test_exception_is_failure_without_secret_in_report(monkeypatch):

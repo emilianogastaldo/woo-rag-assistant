@@ -5,6 +5,7 @@ from langchain_core.documents import Document
 
 from app.config import settings
 from app.rag.chain import NO_RESULTS, KnowledgeBase
+from app.rag.chunks import split_documents
 
 
 class FakeStore:
@@ -18,10 +19,10 @@ class FakeStore:
 
 
 def doc(title: str, text: str, url: str = "http://localhost:8080/spedizioni") -> Document:
-    return Document(
+    return split_documents([Document(
         page_content=text,
         metadata={"title": title, "source": url, "type": "page"},
-    )
+    )])[0]
 
 
 async def test_chunk_pertinenti_producono_contesto_e_fonti():

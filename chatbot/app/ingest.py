@@ -18,9 +18,9 @@ import asyncio
 import httpx
 from bs4 import BeautifulSoup
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import settings
+from app.rag.chunks import split_documents
 from app.rag.store import get_chroma_client, get_vector_store
 from app.tools.woo_client import WooClient
 
@@ -97,8 +97,7 @@ def main() -> None:
         print("[ingest] Nessun documento trovato: interrompo.")
         return
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=120)
-    chunks = splitter.split_documents(docs)
+    chunks = split_documents(docs)
     print(f"[ingest] {len(chunks)} chunk dopo lo splitting")
 
     # Reset idempotente: azzera la collection prima di reindicizzare.
@@ -110,7 +109,7 @@ def main() -> None:
         pass
 
     store = get_vector_store(client=client)
-    store.add_documents(chunks)
+    store.add_documents(chunks, ids=[doc.metadata["chunk_id"] for doc in chunks])
     print(f"[ingest] Indicizzati {len(chunks)} chunk in '{settings.chroma_collection}'. Fatto.")
 
 

@@ -53,9 +53,21 @@ class ChatRequest(BaseModel):
     history: list[Message] = Field(default_factory=list)
 
 
+class ChatSource(BaseModel):
+    title: str
+    url: str
+    type: str
+    chunk_ids: list[str] = Field(
+        min_length=1, description="ID citati nella risposta e recuperati in questa richiesta",
+    )
+
+
 class ChatResponse(BaseModel):
-    reply: str
-    sources: list[dict[str, str]] = []
+    reply: str = Field(description="Testo con citazioni [chunk-v1-<sha256>] validate")
+    sources: list[ChatSource] = Field(
+        default_factory=list,
+        description="Sole fonti citate valide, deduplicate per URL e tipo; altrimenti lista vuota",
+    )
     authenticated: bool = False
     tools_used: list[str] = []
 
@@ -112,7 +124,7 @@ async def chat(req: ChatRequest, authorization: str | None = Header(default=None
     result = await answer(req.message, session=session, history=_to_messages(req.history))
     return ChatResponse(
         reply=result.reply,
-        sources=result.sources,
+        sources=[ChatSource(**source) for source in result.sources],
         authenticated=session is not None,
         tools_used=result.tools_used,
     )

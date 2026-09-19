@@ -79,6 +79,8 @@ unità della tariffa. La stima è di richieste, non un preventivo in euro né un
 di spesa. Il report misura token generativi e chiamate effettive; non misura i token
 embedding. Una temperatura zero non rende le risposte live deterministiche:
 confrontare più ripetizioni e interpretare le variazioni prima di attribuirle al codice.
+Gli ID espliciti e le istruzioni di citazione aumentano i token di input/output:
+il numero massimo di chiamate rimane invariato, il costo per risposta può aumentare.
 
 ## Metriche e confronto
 
@@ -87,8 +89,9 @@ confrontare più ripetizioni e interpretare le variazioni prima di attribuirle a
 | `routing_accuracy` | Strada derivata dai tool eseguiti uguale a quella attesa. RAG selezionato ma vuoto resta `rag`; `none` significa nessun tool eseguito. |
 | `tool_accuracy` | Uguaglianza dei set di tool attesi/eseguiti. Le ripetizioni non cambiano il set ma aumentano i contatori. |
 | `hit_at_k`, `mrr` | Presenza e rango reciproco della fonte attesa nel primo retrieval reale della domanda, prima della soglia; k è nella configurazione. Mancato retrieval con fonte attesa vale zero. |
-| `citation_precision` | Fonti strutturate corrette / fonti strutturate uniche restituite; riconoscimento da SKU o titolo nei metadati del retrieval. Zero se manca una fonte richiesta, `null` se non è richiesta e non ci sono citazioni. |
+| `citation_precision` | Fonti strutturate corrette e sostenute da ID citati validi / fonti strutturate uniche restituite; riconoscimento da SKU o titolo. Zero se manca una fonte richiesta, `null` se non è richiesta e non ci sono citazioni. |
 | `citation_recall` | Presenza della fonte richiesta, per impedire che omettere tutte le fonti migliori la precisione. |
+| `citation_validity` | Gli ID nel testo coincidono con quelli attribuiti in `sources`, sono recuperati sotto soglia nel turno e corrispondono ai metadati della fonte. Una fonte attesa richiede almeno un ID; senza fonte attesa non devono esserci citazioni. |
 | `answer_correct` | Tutte le regex `answer_all` trovate e nessuna `answer_none`. Le regex includono fatti, astensioni, invito al login e divieti di divulgazione. |
 | `abstention_correct` | Stesso controllo nei soli casi `abstain`, `decline`, `login`, `not_found`; `null` negli altri. |
 | `latency_ms` | Durata del singolo `answer()`, include modello/tool; setup del corpus separato. |
@@ -101,8 +104,24 @@ escluso dal report. Il pass richiede tutti i controlli qualitativi applicabili a
 
 La correttezza è un controllo lessicale riproducibile, non una valutazione semantica
 completa: può bocciare parafrasi corrette o non cogliere contraddizioni inattese.
-La precisione valuta `sources`, non le citazioni libere nel testo. Queste misure sono
-indicatori parziali di groundedness e non certificano l'assenza di allucinazioni.
+La precisione valuta `sources` e richiede citazioni esplicite valide nel testo;
+`citation_validity` esegue un controllo indipendente dal validatore dell'agente.
+Queste misure verificano attribuzione e provenienza, non implicazione semantica
+tra ogni affermazione e il passaggio: non certificano l'assenza di allucinazioni.
+
+Le fixture usano gli stessi ID deterministici dell'ingestion. Il modello offline
+riporta i marcatori effettivi dei ToolMessage; i test di regressione rimuovono o
+inventano citazioni e iniettano fonti non citate per verificare che l'eval fallisca.
+Il benchmark mantiene i 30 scenari della #3; i test aggiungono deduplica, ricerche
+multiple, isolamento fra turni/concorrenza, HTTP e stabilità di due ingestion finte.
+Il backend si astiene dopo RAG senza citazioni valide, anche per una risposta mista.
+
+Il report passa a **schema 2** per la nuova semantica delle citazioni; cambia anche
+l'hash delle fixture. Baseline della #3/schema 1 vengono intenzionalmente rifiutate:
+rigenerare una baseline con questo schema per successivi confronti automatici.
+Per la migrazione confrontare separatamente i 30 casi invariati e i contatori;
+non alterare gli hash per far accettare report incompatibili. Nessun contenuto
+dei chunk, ID di chunk o testo delle risposte viene aggiunto ai report.
 
 Il JSON versionato salva ID, ripetizione, strada/tool da un vocabolario chiuso,
 metriche, hash del dataset/fixture/implementazione e configurazione. I nomi modello

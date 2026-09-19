@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import settings
+from app.rag.chunks import verified_chunk_id
 from app.rag.store import get_vector_store
 
 NO_RESULTS = (
@@ -38,11 +39,16 @@ class Source:
 @dataclass
 class RetrievalResult:
     context: str
-    sources: list[Source] = field(default_factory=list)
+    chunks: dict[str, Source] = field(default_factory=dict)
+
+    @property
+    def sources(self) -> list[Source]:
+        """Fonti recuperate, ancora NON attribuite alla risposta."""
+        return list(dict.fromkeys(self.chunks.values()))
 
     @property
     def found(self) -> bool:
-        return bool(self.sources)
+        return bool(self.chunks)
 
 
 class KnowledgeBase:
@@ -64,9 +70,11 @@ class KnowledgeBase:
             return RetrievalResult(context=NO_RESULTS)
 
         blocks: list[str] = []
-        sources: list[Source] = []
-        seen: set[tuple[str, str]] = set()
+        chunks: dict[str, Source] = {}
         for doc, _score in relevant:
+            identifier = verified_chunk_id(doc)
+            if identifier is None or identifier in chunks:
+                continue
             meta = doc.metadata or {}
             title = str(meta.get("title", "")) or "Documento del negozio"
             source = Source(
@@ -74,10 +82,7 @@ class KnowledgeBase:
                 url=str(meta.get("source", "")),
                 type=str(meta.get("type", "")),
             )
-            key = (source.title, source.url)
-            if key not in seen:
-                seen.add(key)
-                sources.append(source)
-            blocks.append(f"[Fonte: {title}]\n{doc.page_content}")
+            chunks[identifier] = source
+            blocks.append(f"[{identifier}] {doc.page_content}")
 
-        return RetrievalResult(context="\n\n---\n\n".join(blocks), sources=sources)
+        return RetrievalResult(context="\n\n---\n\n".join(blocks) or NO_RESULTS, chunks=chunks)
