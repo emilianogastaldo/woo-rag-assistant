@@ -32,8 +32,9 @@ WooCommerce → chunking → embedding → ChromaDB.
   shop, my-account) e la Sample Page.
 - **Estrazione**: HTML→testo con BeautifulSoup. **LlamaParse** è predisposto ma
   riservato ai documenti veri (es. policy in PDF), non usato su HTML semplice.
-- **Chunking**: `RecursiveCharacterTextSplitter` (800/120) con metadati
-  `source`/`title`/`type` per la citazione delle fonti.
+- **Chunking**: `RecursiveCharacterTextSplitter` (800/120, configurato in
+  `app/config.py`) con metadati `source`/`title`/`type`, `start_index` e `chunk_id`.
+  Gli ID deterministici sono anche gli ID dei record Chroma (vedi DEC-010).
 - **Idempotenza**: la collection `woo_knowledge` viene azzerata e riscritta a ogni run.
 - Store condiviso con la catena RAG in `app/rag/store.py`.
 
@@ -95,10 +96,11 @@ Conseguenze accettate:
 - una chiamata a un tool inesistente è possibile e va gestita: il loop risponde
   "strumento non disponibile" invece di sollevare, e il modello si corregge.
 
-**Le fonti non le produce l'LLM.** Sono raccolte dai metadati dei chunk restituiti dal
-retrieval e restituite a parte nella risposta HTTP: una citazione inventata è
-strutturalmente impossibile, non solo scoraggiata dal prompt. Tool e fonti viaggiano
-insieme in un `Toolset`, così chi costruisce i tool non può perdere le citazioni.
+**I metadati delle fonti non li produce l'LLM.** Il retrieval registra i chunk
+candidati; soltanto gli ID citati nella risposta finale e validati contro quel
+registro generano fonti HTTP. La sola presenza nel retrieval non dimostra uso nella
+risposta. Tool e registro appartengono al `Toolset`, con isolamento per esecuzione
+(DEC-010).
 
 ### DEC-004 — Autorizzazione: toolset condizionale e doppio filtro
 Tre livelli, tutti nel codice:
@@ -204,3 +206,54 @@ URL, email, customer ID, credenziale o eccezione grezza. Baseline incompatibili
 vengono rifiutate prima delle chiamate live. Correttezza testuale e precisione delle
 fonti sono indicatori parziali di groundedness: non dimostrano l'assenza di ogni
 affermazione inventata e non sostituiscono la revisione delle risposte live.
+
+### DEC-010 — Citazioni esplicite con identità deterministica del chunk
+
+`app/rag/chunks.py` è condiviso da ingestion e fixture/sweep eval. L'ID è
+`chunk-v1-` seguito da SHA-256 completo, esadecimale minuscolo, della lista JSON
+`["v1", source, title, type, start_index, page_content]`, serializzata con
+`ensure_ascii=False`, separatori `,`/`:` e codifica UTF-8. Non usa UUID, hash Python,
+ordine globale dei documenti, timestamp o credenziali. A parità di documento e
+chunking, ingestion ripetute producono gli stessi ID anche riordinando le fonti.
+Testo, metadati o offset diversi producono ID diversi; cambiare chunking può quindi
+cambiare gli ID. Duplicati identici vengono deduplicati prima di scrivere nello store.
+
+Il retrieval applica la soglia e ricontrolla hash, offset e metadati obbligatori:
+record legacy, incompleti o incoerenti non entrano nel contesto. Per ogni chunk
+valido produce `[chunk-id] testo` e conserva la mappa ID → `Source`. I contenuti
+documentali e i dati WooCommerce sono esplicitamente trattati nel prompt come
+dati non fidati; eventuali ID nel loro testo non registrano altre fonti.
+
+Ogni `answer()` crea un registro vuoto tramite `ContextVar` del toolset, lo aggiorna
+con le sole ricerche di quell'esecuzione e lo ripristina in `finally`, anche in caso
+di errore. Questo isola turni sequenziali e concorrenti con toolset riutilizzato.
+La cronologia, il messaggio utente e i risultati dei tool dati non popolano il
+registro. Un ID usato in passato è nuovamente valido solo se recuperato in questo
+turno. Nessuna nuova autorizzazione viene affidata al modello: scoping e toolset
+ordini rimangono quelli di DEC-004.
+
+`app/rag/citations.py` estrae i marcatori `[chunk-…]` dal solo testo finale,
+rimuove quelli non presenti nel registro e raggruppa i validi per URL e tipo.
+Ordine delle fonti e degli ID: prima citazione nel testo. Ogni fonte HTTP contiene
+`title`, `url`, `type`, `chunk_ids` (solo ID citati, senza ripetizioni). Più ricerche
+e più chunk dello stesso documento non moltiplicano le fonti. Il widget usa questa
+mappa per riferimenti numerati, mantiene gli ID originali nella cronologia e rende
+testo/etichette con nodi DOM; sono cliccabili solo URL HTTP(S).
+
+**Policy senza citazioni:** dopo qualsiasi chiamata RAG, se nessuna citazione è
+valida, il testo generato è sostituito da `UNCITED_REPLY` e le fonti sono vuote.
+Questo copre anche retrieval vuoto/legacy e risposte miste senza citazioni: si
+rinuncia conservativamente anche alla parte dati, evitando di separare frasi con
+euristiche fragili. Il limite dei passi produce `FALLBACK_REPLY` senza fonti.
+Non si aggiungono chiamate di riparazione al modello. Senza RAG, risposte dati e
+declini mantengono il testo con eventuali marcatori non validi rimossi, senza fonti.
+
+**Limite:** la validazione prova esistenza, provenienza e citazione del chunk nella
+richiesta; non dimostra che il passaggio sostenga semanticamente la frase, né che
+ogni frase documentale abbia una citazione. Un ID valido non certifica la verità
+del documento e non è una difesa generale contro prompt injection.
+
+**Migrazione:** ricostruire l'immagine ingest e reindicizzare la collection dopo
+il deploy; fino ad allora i vecchi record non sono citabili. È un'operazione live
+separata, con embedding e reset della collection, da autorizzare esplicitamente.
+Nessuna ingestion live è necessaria ai test: lo store viene simulato.

@@ -22,7 +22,10 @@ def stub_answer(monkeypatch):
         calls.append({"message": message, "session": session, "history": history or []})
         return AgentResult(
             reply="risposta",
-            sources=[{"title": "Spedizioni", "url": "http://x", "type": "page"}],
+            sources=[{
+                "title": "Spedizioni", "url": "http://x", "type": "page",
+                "chunk_ids": ["chunk-test"],
+            }],
             tools_used=["cerca_informazioni_negozio"],
         )
 

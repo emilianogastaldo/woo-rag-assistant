@@ -9,6 +9,8 @@ from datetime import date
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, ToolMessage
 
+from app.rag.chunks import split_documents
+
 RAG = "cerca_informazioni_negozio"
 STOCK = "verifica_disponibilita_prodotto"
 ORDER = "stato_ordine"
@@ -43,7 +45,7 @@ CORPUS = {
 
 
 def documents():
-    return [
+    return split_documents([
         Document(
             page_content=text,
             metadata={
@@ -54,7 +56,7 @@ def documents():
             },
         )
         for index, (key, text) in enumerate(CORPUS.items())
-    ]
+    ])
 
 
 class FrozenDate(date):

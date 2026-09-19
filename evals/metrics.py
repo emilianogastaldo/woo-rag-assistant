@@ -11,9 +11,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.config import settings
+from app.rag.chunks import verified_chunk_id
 from evals.fixtures import RAG, TOOLS
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 QUALITY = (
     "routing_accuracy",
     "tool_accuracy",
@@ -23,6 +25,7 @@ QUALITY = (
     "mrr",
     "citation_precision",
     "citation_recall",
+    "citation_validity",
 )
 COUNTERS = (
     "llm_calls",
@@ -119,8 +122,29 @@ def score(case, result, retrieval, trace, woo_calls, latency_ms, error=False):
         for doc, _ in results
     }
     citations = {(s.get("title"), s.get("url")) for s in result.sources}
+    # Audit indipendente dal validatore dell'agente: ID nel testo, sotto soglia,
+    # metadati coerenti e appartenenza alla stessa esecuzione.
+    retrieved_ids = {
+        identifier: (doc.metadata["title"], doc.metadata["source"], doc.metadata["type"])
+        for results in retrieval.results
+        for doc, distance in results
+        if distance <= settings.retrieval_max_distance
+        and (identifier := verified_chunk_id(doc)) is not None
+    }
+    text_ids = set(re.findall(r"\[(chunk-[^\[\]\s]*)\]", result.reply))
+    attributed_ids = {identifier for s in result.sources for identifier in s.get("chunk_ids", [])}
+    verified_sources = {
+        (s.get("title"), s.get("url"))
+        for s in result.sources
+        if s.get("chunk_ids")
+        and all(
+            identifier in text_ids
+            and retrieved_ids.get(identifier) == (s.get("title"), s.get("url"), s.get("type"))
+            for identifier in s["chunk_ids"]
+        )
+    }
     correct_citations = sum(
-        identities.get(citation) == case.expected_source
+        citation in verified_sources and identities.get(citation) == case.expected_source
         for citation in citations
         if case.expected_source is not None
     )
@@ -141,6 +165,10 @@ def score(case, result, retrieval, trace, woo_calls, latency_ms, error=False):
         "mrr": (1.0 / rank if rank else 0.0) if case.expected_source else None,
         "citation_precision": precision,
         "citation_recall": float(correct_citations > 0) if case.expected_source else None,
+        "citation_validity": float(
+            not error and text_ids == attributed_ids and citations == verified_sources
+            and (bool(text_ids) if case.expected_source else not text_ids)
+        ),
         "llm_calls": trace.llm_calls,
         "tool_calls": trace.tool_calls,
         "unavailable_tool_calls": trace.unavailable_tool_calls,

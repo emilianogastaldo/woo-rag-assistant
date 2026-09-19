@@ -31,6 +31,34 @@ Widget chat (JS) → Backend FastAPI → { ChromaDB | OpenAI | WooCommerce REST 
 
 Le decisioni di design sono in [`docs/architecture.md`](docs/architecture.md).
 
+## Citazioni verificabili
+
+Ogni chunk riceve un ID `chunk-v1-<sha256>` deterministico da URL, titolo, tipo,
+posizione nel documento e testo. Il tool RAG restituisce `[chunk-id] testo`;
+l'agente deve citare gli ID dei passaggi usati. Il backend valida le citazioni
+contro i soli chunk recuperati **nella richiesta corrente**, anche con più ricerche.
+Una fonte recuperata ma non citata non compare in `sources`.
+
+`POST /chat` restituisce `reply`, `sources`, `authenticated` e `tools_used`.
+Ogni fonte contiene `title`, `url`, `type` e `chunk_ids`: solo gli ID effettivamente
+citati, deduplicati; la fonte compare una sola volta per URL e tipo. Il widget
+converte le citazioni valide in riferimenti numerati `[1]`, collegati alla fonte.
+Lo schema completo è disponibile in `/docs` e `/openapi.json`.
+
+Gli ID sconosciuti vengono rimossi dal testo. Se è stato usato il RAG ma manca
+qualsiasi citazione valida, il backend restituisce un'astensione e `sources: []`,
+anche nel caso misto RAG+dati. Nessuna chiamata aggiuntiva di riparazione. Risposte solo dati,
+saluti e fuori dominio senza RAG hanno fonti vuote. La verifica attesta la
+provenienza del passaggio, **non** la correttezza semantica di ogni affermazione.
+Documenti e dati WooCommerce restano dati non fidati, mai istruzioni.
+
+**Migrazione:** gli indici precedenti senza ID vengono scartati dal retrieval.
+Dopo l'aggiornamento occorre ricostruire l'immagine ingest e reindicizzare con
+`docker compose build ingest` e `docker compose run --rm ingest`, solo dopo
+autorizzazione alle chiamate WooCommerce/WordPress, OpenAI e ChromaDB.
+Il chunking mantiene i default 800/120, configurati in `app/config.py`
+(`CHUNK_SIZE` e `CHUNK_OVERLAP` nell'ambiente del processo ingest).
+
 ## Perimetro v1
 
 **Sola lettura**: nessun annullamento, nessuna modifica, nessun rimborso. Le chiavi
@@ -119,8 +147,8 @@ docker compose run --rm --no-deps eval-offline python -m evals.run_agent_eval --
 ```
 
 I report JSON in `evals/results/` misurano routing, hit@k/MRR, precisione delle
-citazioni, correttezza/astensione, latenza e chiamate, senza salvare conversazioni
-o segreti. `--baseline` evidenzia le regressioni per domanda. Il live richiede
+citazioni, validità degli ID, correttezza/astensione, latenza e chiamate, senza salvare
+conversazioni o segreti. `--baseline` evidenzia le regressioni per domanda. Il live richiede
 **entrambi** `--live --allow-external` e usa solo dati sintetici; anche il precedente
 sweep di retrieval è ora protetto da opt-in. Comandi, costi, definizioni delle
 metriche e limiti sono in [`evals/README.md`](evals/README.md).

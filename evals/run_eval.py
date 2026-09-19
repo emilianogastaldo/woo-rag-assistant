@@ -62,9 +62,8 @@ def main() -> None:
     if not (args.live and args.allow_external):
         parser.error("requires --live --allow-external (sends store documents to OpenAI)")
 
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-
     from app.ingest import gather_documents
+    from app.rag.chunks import split_documents
     from app.rag.store import get_chroma_client, get_vector_store
 
     cases = load_cases()
@@ -86,16 +85,14 @@ def main() -> None:
 
     best = None
     for cs, ov in CONFIGS:
-        chunks = RecursiveCharacterTextSplitter(chunk_size=cs, chunk_overlap=ov).split_documents(
-            docs
-        )
+        chunks = split_documents(docs, chunk_size=cs, chunk_overlap=ov)
         name = f"eval_{cs}_{ov}"
         try:
             client.delete_collection(name)
         except Exception:
             pass
         store = get_vector_store(client=client, collection_name=name)
-        store.add_documents(chunks)
+        store.add_documents(chunks, ids=[doc.metadata["chunk_id"] for doc in chunks])
 
         ranks = []
         for case in retrieval_cases:
