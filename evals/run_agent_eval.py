@@ -128,9 +128,7 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False, commit=No
         "fixture_digest": digest((HERE / "fixtures.py").read_text()),
         "implementation_digest": digest(
             [
-                Path(__file__).read_text(),
-                (HERE / "metrics.py").read_text(),
-                (HERE / "live.py").read_text(),
+                *[path.read_text() for path in sorted(HERE.glob("*.py"))],
                 *[path.read_text() for path in sorted(Path(agent.__file__).parent.rglob("*.py"))],
             ]
         ),

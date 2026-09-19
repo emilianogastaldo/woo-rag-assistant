@@ -147,7 +147,7 @@ async def evaluate_retrieval(
         "corpus_digest": digest([(d.page_content, d.metadata) for d in docs]),
         "fixture_digest": digest((HERE / "retrieval_fixtures.py").read_text()),
         "implementation_digest": digest([
-            Path(__file__).read_text(),
+            *[p.read_text() for p in sorted(HERE.glob("*.py"))],
             *[p.read_text() for p in sorted(Path(agent.__file__).parent.rglob("*.py"))],
         ]),
         "repeats": repeats,
