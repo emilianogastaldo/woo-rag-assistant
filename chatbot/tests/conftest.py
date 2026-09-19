@@ -7,6 +7,14 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from evals.network import offline_network
+
+
+@pytest.fixture(autouse=True)
+def no_network():
+    """Ogni test fallisce se tenta DNS o connessioni reali, anche in CI."""
+    with offline_network():
+        yield
 
 
 class FakeWooClient:

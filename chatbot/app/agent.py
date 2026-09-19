@@ -104,6 +104,17 @@ class AgentResult:
     tools_used: list[str] = field(default_factory=list)
 
 
+@dataclass
+class AgentTrace:
+    """Contatori opt-in per eval: nessun prompt, argomento o dato cliente."""
+
+    llm_calls: int = 0
+    tool_calls: int = 0
+    unavailable_tool_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 def _as_text(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -216,6 +227,7 @@ async def answer(
     history: list[BaseMessage] | None = None,
     toolset: Toolset | None = None,
     llm: Any | None = None,
+    trace: AgentTrace | None = None,
 ) -> AgentResult:
     """Esegue un giro completo di conversazione e restituisce risposta e fonti."""
     active = toolset if toolset is not None else build_toolset(session)
@@ -228,7 +240,13 @@ async def answer(
 
     used: list[str] = []
     for _ in range(settings.agent_max_steps):
+        if trace is not None:
+            trace.llm_calls += 1
         ai_message: AIMessage = await model.ainvoke(messages)
+        if trace is not None:
+            usage = getattr(ai_message, "usage_metadata", None) or {}
+            trace.input_tokens += usage.get("input_tokens", 0)
+            trace.output_tokens += usage.get("output_tokens", 0)
         messages.append(ai_message)
 
         tool_calls = getattr(ai_message, "tool_calls", None)
@@ -240,8 +258,12 @@ async def answer(
             )
 
         for call in tool_calls:
+            if trace is not None:
+                trace.tool_calls += 1
             tool = by_name.get(call["name"])
             if tool is None:
+                if trace is not None:
+                    trace.unavailable_tool_calls += 1
                 output = "Strumento non disponibile per questa conversazione."
             else:
                 used.append(call["name"])

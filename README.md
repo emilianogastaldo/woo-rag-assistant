@@ -96,25 +96,34 @@ l'assistenza.
 ## Sviluppo
 
 ```bash
-docker compose run --rm --no-deps chatbot-api ruff check .
-docker compose run --rm --no-deps chatbot-api pytest -q
+docker compose run --rm --no-deps eval-offline ruff check . /evals --config /app/pyproject.toml
+docker compose run --rm --no-deps eval-offline pytest -q
 ```
 
-I test non toccano la rete: WooCommerce, ChromaDB e il modello sono sostituiti da
-doppi di test. La CI (GitHub Actions) esegue lint e test su ogni PR.
+Il profilo `eval-offline` usa l'immagine del backend già costruita, senza rete,
+credenziali o servizi dipendenti. Al primo utilizzo costruiscila con
+`docker compose build chatbot-api` (richiede il download delle dipendenze).
+Pytest blocca anche DNS e socket: WooCommerce, ChromaDB e il modello sono sostituiti
+da doppi di test. La CI esegue lint, test ed eval offline su ogni PR.
 
 ## Valutazione
 
-`evals/golden.jsonl` contiene il golden dataset (domanda, risposta attesa, fonte
-attesa) diviso per tipo: `page`, `product`, `mixed`, `order`, `out_of_domain`.
+`evals/golden.jsonl` contiene 30 domande con risposta, fonte, strada e tool attesi:
+RAG, dati, RAG+dati, nessuna fonte e casi avversari. Il runner attraversa il loop
+reale dell'agente, il retrieval con soglia e i servizi ordini/catalogo.
 
 ```bash
-docker compose run --rm -v "$PWD/evals:/evals" ingest python /evals/run_eval.py
+docker compose run --rm --no-deps eval-offline
+# Stima del live: nessuna rete, nessuna API chiamata
+docker compose run --rm --no-deps eval-offline python -m evals.run_agent_eval --estimate --repeats 3
 ```
 
-Lo script fa uno sweep su più `chunk_size` misurando hit@k e MRR, e confronta le
-distanze in-dominio e fuori-dominio per calibrare la soglia di pertinenza
-(`RETRIEVAL_MAX_DISTANCE`, vedi DEC-005).
+I report JSON in `evals/results/` misurano routing, hit@k/MRR, precisione delle
+citazioni, correttezza/astensione, latenza e chiamate, senza salvare conversazioni
+o segreti. `--baseline` evidenzia le regressioni per domanda. Il live richiede
+**entrambi** `--live --allow-external` e usa solo dati sintetici; anche il precedente
+sweep di retrieval è ora protetto da opt-in. Comandi, costi, definizioni delle
+metriche e limiti sono in [`evals/README.md`](evals/README.md).
 
 ## Stack
 

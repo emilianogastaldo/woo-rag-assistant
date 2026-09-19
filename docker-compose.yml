@@ -1,6 +1,23 @@
 name: woo-chatbot
 
 services:
+  # Test/eval offline: nessuna rete, nessun segreto, nessun servizio dipendente.
+  eval-offline:
+    image: woo-chatbot-chatbot-api:latest
+    build: ./chatbot
+    pull_policy: never
+    profiles: ["eval"]
+    network_mode: none
+    environment:
+      PYTHONPATH: /app:/
+      OPENAI_API_KEY: ""
+      LANGCHAIN_TRACING_V2: "false"
+      ANONYMIZED_TELEMETRY: "false"
+    volumes:
+      - ./chatbot:/app
+      - ./evals:/evals
+    command: python -m evals.run_agent_eval
+
   # --- Il negozio: WordPress + WooCommerce ---
   db:
     image: mariadb:11
@@ -68,6 +85,7 @@ services:
       - ./chatbot:/app
       # Il widget è servito dal backend su /widget per comodità di demo.
       - ./widget:/widget:ro
+      - ./evals:/evals
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # --- Pipeline di ingestion (one-shot, profilo dedicato) ---

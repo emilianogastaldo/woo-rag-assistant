@@ -171,3 +171,36 @@ quella data, in linea con la policy di reso.
 Il seed assegna questo metadata all'ordine demo completato di Mario e applica una
 piccola migrazione idempotente (`wrag_seed_delivery_date_v1`) per gli ambienti seed
 creati prima dell'introduzione della convenzione.
+
+### DEC-009 — Evaluation del loop con fixture e live separati
+
+`evals/run_agent_eval.py` valuta `answer()` direttamente: include prompt, toolset
+condizionale, loop, retrieval con soglia, servizi ordini/catalogo e raccolta fonti.
+HTTP, emissione token, WordPress e Chroma remoto restano fuori da questo benchmark;
+l'autenticazione HTTP continua a essere verificata dai test dell'API.
+
+Il golden dichiara strada (`rag`, `data`, `mixed`, `none`), set di tool, fonte,
+esito e regole testuali positive/negative. Le fixture sono indipendenti dalle
+aspettative: il fake LLM segue piani espliciti e legge i ToolMessage effettivi;
+non copia la risposta attesa dal golden. I servizi reali ricevono dati Woo
+sintetici, incluso un ordine altrui restituito intenzionalmente dal fake server
+per verificare il filtro locale. La data del prompt è fissata al 19/09/2026.
+
+Offline, rete bloccata nel runner, in pytest e nel profilo Docker `eval-offline`.
+Il risultato verifica regressioni del codice e delle metriche, **non** la capacità
+di routing di un modello reale. I contatori sono raccolti tramite `AgentTrace`,
+opzionale e server-side: non modifica il payload HTTP e non memorizza contenuti.
+
+Il live richiede consenso esplicito prima della costruzione dei client. Usa OpenAI
+per generazione ed embedding di un corpus sintetico versionato, ricerca esatta
+coseno in memoria e gli stessi servizi su dati Woo simulati. Non legge clienti
+reali né cambia collection. Permette di confrontare prompt/modello/soglia a parità
+di dati; per misurare ingestion, chunking e Chroma reali rimane lo sweep
+`evals/run_eval.py`, anch'esso live opt-in e con un perimetro dati distinto.
+
+Report: schema versionato, hash di dataset/fixture/implementazione, configurazione
+numerica, ID domanda, metriche e contatori; nessun prompt, risposta, argomento tool,
+URL, email, customer ID, credenziale o eccezione grezza. Baseline incompatibili
+vengono rifiutate prima delle chiamate live. Correttezza testuale e precisione delle
+fonti sono indicatori parziali di groundedness: non dimostrano l'assenza di ogni
+affermazione inventata e non sostituiscono la revisione delle risposte live.
