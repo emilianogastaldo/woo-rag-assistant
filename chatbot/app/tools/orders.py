@@ -9,7 +9,7 @@ Sicurezza (vedi CLAUDE.md):
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.tools.woo_client import WooClient
@@ -22,11 +22,17 @@ ORDER_NOT_FOUND = (
 
 NO_ORDERS = "L'account non ha ordini registrati."
 
+# Convenzione del negozio: questo metadata viene scritto dall'integrazione di
+# tracking soltanto dopo la conferma di consegna del corriere. WooCommerce non
+# espone una data di consegna standard, quindi date_completed non è un sostituto.
+DELIVERY_DATE_META_KEY = "_wrag_delivery_date"
+RETURN_WINDOW_DAYS = 30
+
 STATUS_LABELS = {
     "pending": "in attesa di pagamento",
     "processing": "in lavorazione",
     "on-hold": "sospeso",
-    "completed": "completato (consegnato)",
+    "completed": "completato",
     "cancelled": "annullato",
     "refunded": "rimborsato",
     "failed": "pagamento fallito",
@@ -34,13 +40,38 @@ STATUS_LABELS = {
 }
 
 
-def _format_date(value: str | None) -> str | None:
-    if not value:
+def _parse_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
         return None
     try:
-        return datetime.fromisoformat(value).strftime("%d/%m/%Y")
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        return str(value)
+        return None
+
+
+def _format_date(value: Any) -> str | None:
+    parsed = _parse_datetime(value)
+    if parsed:
+        return parsed.strftime("%d/%m/%Y")
+    return str(value) if value else None
+
+
+def _verified_delivery_at(order: dict[str, Any]) -> datetime | None:
+    """Restituisce solo la consegna esplicitamente confermata dal tracking.
+
+    ``date_completed`` rappresenta il completamento amministrativo dell'ordine
+    e non viene mai usata qui: non prova che il pacco sia stato consegnato.
+    """
+    metadata = order.get("meta_data", [])
+    if not isinstance(metadata, list):
+        return None
+
+    for metadata_item in metadata:
+        if not isinstance(metadata_item, dict):
+            continue
+        if metadata_item.get("key") == DELIVERY_DATE_META_KEY:
+            return _parse_datetime(metadata_item.get("value"))
+    return None
 
 
 def format_order(order: dict[str, Any]) -> str:
@@ -56,7 +87,21 @@ def format_order(order: dict[str, Any]) -> str:
     ]
     completed_at = _format_date(order.get("date_completed"))
     if completed_at:
-        lines.append(f"Data completamento/consegna: {completed_at}")
+        lines.append(f"Data completamento: {completed_at}")
+    delivered_at = _verified_delivery_at(order)
+    if delivered_at:
+        lines.append(f"Data consegna verificata: {delivered_at.strftime('%d/%m/%Y')}")
+        deadline = delivered_at + timedelta(days=RETURN_WINDOW_DAYS)
+        lines.append(
+            f"Scadenza reso ({RETURN_WINDOW_DAYS} giorni dalla consegna verificata): "
+            f"{deadline.strftime('%d/%m/%Y')}"
+        )
+    else:
+        lines.append("Data consegna verificata: non disponibile")
+        lines.append(
+            "Scadenza reso: non calcolabile senza una data di consegna verificata; "
+            "contatta l'assistenza."
+        )
     lines.append(f"Articoli: {items or 'nessuno'}")
     lines.append(f"Totale: {order.get('total', 'n/d')} {order.get('currency', '')}".strip())
     return "\n".join(lines)
