@@ -7,6 +7,14 @@
 # =============================================================
 set -eu
 
+# service_started precedes WordPress copying core/config into a new volume.
+remaining=60
+while [ ! -f wp-config.php ]; do
+    remaining=$((remaining - 1))
+    [ "$remaining" -gt 0 ] || { echo "WordPress bootstrap timeout" >&2; exit 1; }
+    sleep 1
+done
+
 export WP_CLI_CACHE_DIR=/tmp/wpcache
 URL="http://localhost:8080"
 

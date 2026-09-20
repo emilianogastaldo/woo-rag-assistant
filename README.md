@@ -173,7 +173,8 @@ wheel completo installato nella build. L'harness `python3 evals/run_issue7_integ
 verifica immagini standalone, servizi reali isolati e guasti con provider sintetici.
 
 Comandi, vincoli POSIX, backup, recovery e migrazione della demo:
-[guida operativa](docs/ingestion-deployment.md).
+[guida operativa](docs/ingestion-deployment.md) e
+[risultati verificati](docs/issue-7-results.md).
 La demo esistente non viene reindicizzata automaticamente.
 
 ## Sviluppo

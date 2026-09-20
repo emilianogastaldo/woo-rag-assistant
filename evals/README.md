@@ -305,7 +305,7 @@ ordini incrociati e payload modello vengono verificati via HTTP.
 reale sulla rete interna: contratto, login/logout, scadenza, risposta tardiva e
 isolamento identità. **Non è un browser né una verifica visuale**: non prova layout,
 policy cookie/CORS del browser o rendering. Richiede l'immagine locale
-`node:22-alpine` oltre alle immagini API/Chroma; nessun download automatico.
+l’immagine Node fissata a digest nel Compose oltre alle immagini API/Chroma; nessun download automatico.
 
 I report sotto `evals/results/woo-issue6-*/` contengono inventario, hash codice/
 fixture, esiti, durata e contatori sintetici senza payload, token o email. Il numero
