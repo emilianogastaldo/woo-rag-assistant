@@ -164,6 +164,32 @@ credenziali o servizi dipendenti. Al primo utilizzo costruiscila con
 Pytest blocca anche DNS e socket: WooCommerce, ChromaDB e il modello sono sostituiti
 da doppi di test. La CI esegue lint, test ed eval offline su ogni PR.
 
+### Timeout, retry ed errori
+
+L'API usa un budget per richiesta condiviso da modello, retrieval e WooCommerce:
+`AGENT_MAX_ATTEMPTS` limita tutti i tentativi esterni, i dispatch tool e le
+riformulazioni, mentre `AGENT_RETRY_BUDGET` limita
+i tentativi aggiuntivi. La riformulazione RAG abilitata da
+`RETRIEVAL_RETRY_ATTEMPTS=1` consuma lo stesso budget dei retry provider e HTTP;
+non esistono cicli di retry annidati con budget indipendenti. `AGENT_MAX_STEPS`,
+`AGENT_MAX_REPEATED_ERRORS` e `REQUEST_DEADLINE_SECONDS` forniscono gli altri tetti.
+
+Sono ritentate al massimo `PROVIDER_RETRY_ATTEMPTS`/`WC_RETRY_ATTEMPTS` volte e
+solo operazioni di lettura: timeout, connessione, 429 (rispettando `Retry-After`) e
+5xx. I 4xx ordinari non sono ritentati. I retry impliciti dell'SDK OpenAI sono
+disabilitati. Nessun risultato RAG produce l'astensione documentale; Chroma o
+provider indisponibili producono invece il fallback temporaneo stabile.
+La generazione ha inoltre un limite di 512 token per chiamata. Il budget è di
+chiamate e tempo, non un tetto monetario; il provider può fatturare richieste
+ricevute anche quando il client scade o annulla l'attesa.
+
+FastAPI mantiene e chiude nei propri hook di lifecycle i client HTTP asincroni
+condivisi. I log operativi JSON contengono request/conversation ID, tool, durata,
+tentativo ed esito, senza argomenti dei tool, URL, prompt, token o eccezioni grezze.
+Il client può inviare `X-Request-ID` e `X-Conversation-ID` (massimo 64 caratteri
+alfanumerici/`._-`); gli ID non validi vengono sostituiti e `X-Request-ID` torna
+nella risposta.
+
 ## Valutazione
 
 `evals/golden.jsonl` contiene 30 domande con risposta, fonte, strada e tool attesi:

@@ -307,10 +307,10 @@ termini riformulati >= `lexical_min_coverage`, anche se supera il gate coseno:
 una domanda compressa non può riaprire l'astensione solo perché cambia distanza.
 Questa salvaguardia nasce dalla regressione `absent-policy` misurata nello smoke
 con embedding reali e corretta con replay offline dei medesimi punteggi.
-Non vengono ritentati errori di rete/provider e non ci sono
-chiamate di generazione per riscrivere. Al massimo due query embedding per ricerca
-con retry abilitato, oltre ai tentativi SDK del provider di produzione.
-Il limite è per ricerca; ulteriori chiamate tool restano sotto il loop dell'agente.
+Non ci sono chiamate di generazione per riscrivere. La riformulazione è distinta
+dal retry tecnico: la prima reagisce a evidenza insufficiente, il secondo soltanto
+a failure transitori. Entrambi consumano però il budget condiviso descritto in
+DEC-013; i retry impliciti del provider sono disabilitati.
 
 Solo il contesto finale ammesso viene registrato per le citazioni; passaggi
 scartati dall'assessor non diventano citabili. Il registro per esecuzione, le
@@ -345,3 +345,53 @@ fonte presente nel contesto ma risposta/citazione errata → generation/citation
 Questa diagnostica è server-side/eval, non un nuovo campo pubblico HTTP.
 Default semantic senza retry: manca ancora un benchmark semantico autorizzato e
 ripetuto che giustifichi il cambio. Nessun MMR/reranker viene aggiunto per intuizione.
+
+### DEC-013 — Failure tipizzati e budget unico dei tentativi
+
+Ogni richiesta crea un `AttemptBudget` con deadline, massimo tentativi esterni e
+massimo retry. Chiamate modello, query retrieval e richieste GET Woo consumano il
+medesimo oggetto tramite `ContextVar`. Anche il secondo tentativo di retrieval della
+#4 è un retry ai fini del budget: se lo consuma, non aumenta il numero di retry
+disponibili a HTTP/provider. I limiti locali definiscono quali operazioni possono
+chiedere un retry, mentre il budget globale è sempre il tetto effettivo.
+Anche ogni dispatch tool (compresi nomi sconosciuti e argomenti invalidi) consuma
+una unità: il massimo è conservativo, non un conteggio esclusivo di richieste HTTP.
+Una riformulazione consuma una unità e un retry; ogni sua successiva chiamata fisica
+consuma un'altra unità. Timeout e cancellazione sono applicati all'intero turno.
+
+Il percorso chat usa `KnowledgeReader`, adapter REST Chroma v2 asincrono in sola
+lettura. Embedding, risoluzione collection e query/get hanno tentativi separati:
+un errore Chroma non riesegue l'embedding già ottenuto. La collection è risolta a
+ogni lettura, senza crearla, e un guasto svuota il registro citazioni del turno.
+L'ingestion conserva il client SDK sincrono; i timeout del percorso chat non
+lasciano thread di rete in esecuzione. L'adapter assume tenant/database Chroma
+predefiniti e metrica coseno configurata dall'ingestion del progetto.
+
+Solo letture possono essere ritentate. OpenAI ha retry SDK zero; il codice gestisce
+timeout/connessione, rate limit e 5xx entro `PROVIDER_RETRY_ATTEMPTS`. Il client Woo
+ritenta GET per timeout/connessione, 429 e 5xx entro `WC_RETRY_ATTEMPTS`, rigenerando
+nonce/firma OAuth e rispettando `Retry-After` senza superare la deadline. 4xx,
+validazione e failure permanenti non vengono ripetuti. `AGENT_MAX_STEPS` ferma i
+giri modello/tool e due failure uguali dello stesso tool fermano anticipatamente il
+loop; entrambi restituiscono un fallback fisso.
+
+La tassonomia separa validazione, timeout, 4xx, 5xx, rate limit, risposta malformata,
+Chroma indisponibile, provider indisponibile, tool ignoto e budget esaurito. I failure
+recuperabili dei tool diventano `ToolMessage` redatti, così il modello può spiegare
+il disservizio. Nessun risultato conserva `NESSUN_RISULTATO_PERTINENTE`; un guasto
+Chroma imposta invece il fallback temporaneo e non pubblica fonti precedenti.
+Errori non classificati continuano a emergere: il loop non usa `except Exception`.
+
+FastAPI possiede un `WooClient` e un `httpx.AsyncClient` provider per lifecycle e li
+chiude allo shutdown. Request e conversation ID vivono in `ContextVar`. Ogni evento
+esterno/tool registra JSON con ID, nome operazione/tool, durata, tentativo, esito e
+classe di failure tramite allowlist; argomenti, query, URL, credenziali, prompt ed
+eccezioni non entrano nel log. Il payload HTTP limita messaggi e storia prima di
+raggiungere provider e tool.
+
+L'integrazione della #5 usa API e server Woo/OpenAI-compatible reali sulla rete
+interna di un progetto Compose univoco, più Chroma reale fissato per digest. Inietta
+timeout, 429, 4xx, 5xx e JSON malformato, misura il limite temporale, verifica riuso
+del client e arresta/riavvia soltanto il Chroma dedicato. Collection, volume,
+credenziali e nomi sono sintetici; nessuna porta è pubblicata e il cleanup rimuove
+soltanto il progetto creato dal run.
