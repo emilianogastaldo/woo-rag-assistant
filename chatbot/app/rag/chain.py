@@ -16,10 +16,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import chromadb.errors
+import httpx
+import openai
 from langchain_core.documents import Document
 
 from app.config import RetrievalConfig, settings
 from app.rag.lexical import BM25Index, documents_from_records
+from app.rag.reader import KnowledgeReader
 from app.rag.retrieval import (
     RetrievalAttempt,
     evidence_gate,
@@ -28,7 +32,14 @@ from app.rag.retrieval import (
     reformulate,
     retry_supported,
 )
-from app.rag.store import get_vector_store
+from app.resilience import (
+    AttemptBudget,
+    FailureKind,
+    RecoverableFailure,
+    budget_scope,
+    current_budget,
+    retry_call,
+)
 
 NO_RESULTS = (
     "NESSUN_RISULTATO_PERTINENTE. La knowledge base del negozio non contiene "
@@ -79,10 +90,15 @@ class KnowledgeBase:
     @property
     def store(self) -> Any:
         if self._store is None:
-            self._store = get_vector_store()
+            self._store = KnowledgeReader()
         return self._store
 
     async def search(self, query: str, k: int | None = None) -> RetrievalResult:
+        if current_budget() is None:
+            with budget_scope(AttemptBudget(settings.agent_max_attempts,
+                                           settings.agent_retry_budget,
+                                           settings.request_deadline_seconds)):
+                return await self.search(query, k)
         config = self._config or settings.retrieval
         if k is not None:
             config = RetrievalConfig(**{**config.model_dump(), "k": k})
@@ -92,7 +108,13 @@ class KnowledgeBase:
             started = time.perf_counter()
             # Read the current collection every search: no stale lexical sidecar after
             # reingestion/delete/restart, including same-count corpus replacements.
-            records = await asyncio.to_thread(self.store.get, include=["documents", "metadatas"])
+            records = await self._read_store(
+                lambda: self.store.aget() if isinstance(self.store, KnowledgeReader)
+                else asyncio.to_thread(
+                    self.store.get, include=["documents", "metadatas"]
+                ),
+                operation="chroma_snapshot",
+            )
             index = BM25Index(documents_from_records(records), k1=config.bm25_k1, b=config.bm25_b)
             snapshot_ms = (time.perf_counter() - started) * 1000
         attempts = []
@@ -135,8 +157,12 @@ class KnowledgeBase:
         timings = {}
         started = time.perf_counter()
         # Semantic-only keeps the pre-issue-4 query size and threshold behavior.
-        hits = await self.store.asimilarity_search_with_score(
-            query, k=config.k if config.strategy == "semantic" else config.candidates,
+        hits = await self._read_store(
+            lambda: self.store.asimilarity_search_with_score(
+                query, k=config.k if config.strategy == "semantic" else config.candidates,
+            ),
+            operation="retrieval",
+            first_attempt_is_retry=is_retry,
         )
         timings["semantic"] = (time.perf_counter() - started) * 1000
         lexical = []
@@ -171,4 +197,44 @@ class KnowledgeBase:
             query_digest=query_digest(query), strategy=config.strategy, candidates=candidates,
             selected_ids=[c.chunk_id for c in selected], timings_ms=timings, adequacy=adequacy,
             reformulated=is_retry,
+        )
+
+    async def _read_store(self, call, *, operation: str,
+                          first_attempt_is_retry: bool = False):
+        if isinstance(self.store, KnowledgeReader):
+            if first_attempt_is_retry:
+                current_budget().consume(retry=True)
+            return await call()
+        async def mapped_call():
+            try:
+                return await call()
+            except (openai.APITimeoutError, httpx.TimeoutException) as exc:
+                raise RecoverableFailure(FailureKind.TIMEOUT, retryable=True) from exc
+            except openai.RateLimitError as exc:
+                raise RecoverableFailure(FailureKind.RATE_LIMIT, retryable=True) from exc
+            except openai.APIResponseValidationError as exc:
+                raise RecoverableFailure(
+                    FailureKind.MALFORMED_RESPONSE, retryable=True
+                ) from exc
+            except (openai.APIConnectionError, openai.InternalServerError) as exc:
+                raise RecoverableFailure(
+                    FailureKind.PROVIDER_UNAVAILABLE, retryable=True
+                ) from exc
+            except openai.APIStatusError as exc:
+                retryable = exc.status_code >= 500
+                raise RecoverableFailure(
+                    FailureKind.PROVIDER_UNAVAILABLE, retryable=retryable
+                ) from exc
+            except (chromadb.errors.ChromaError, httpx.NetworkError) as exc:
+                raise RecoverableFailure(
+                    FailureKind.CHROMA_UNAVAILABLE, retryable=True
+                ) from exc
+
+        return await retry_call(
+            operation,
+            mapped_call,
+            max_retries=settings.provider_retry_attempts,
+            timeout_seconds=settings.provider_timeout_seconds,
+            idempotent=True,
+            first_attempt_is_retry=first_attempt_is_retry,
         )

@@ -11,20 +11,35 @@ risposta e recuperati in questa esecuzione. Il retrieval da solo non basta.
 """
 from __future__ import annotations
 
+import asyncio
+import time
+from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import StructuredTool, ToolException
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
+from openai.types.chat import ChatCompletion
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.auth.session import Session
 from app.config import settings
+from app.http_clients import current_provider_client
+from app.observability import log_event
 from app.rag.chain import KnowledgeBase, Source
 from app.rag.citations import CitedSource, validate_citations
+from app.resilience import (
+    AttemptBudget,
+    FailureKind,
+    RecoverableFailure,
+    budget_scope,
+    current_budget,
+    provider_call,
+    tool_failure_message,
+)
 from app.tools.catalog import CatalogService
 from app.tools.orders import OrderService
 
@@ -83,21 +98,27 @@ UNCITED_REPLY = (
 
 
 class RicercaInformazioni(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
     domanda: str = Field(
+        min_length=1, max_length=4000,
         description="Domanda o argomento da cercare nella knowledge base del negozio"
     )
 
 
 class DisponibilitaProdotto(BaseModel):
-    prodotto: str = Field(description="Nome o SKU del prodotto da verificare")
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    prodotto: str = Field(min_length=1, max_length=4000,
+                          description="Nome o SKU del prodotto da verificare")
 
 
 class StatoOrdine(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     numero_ordine: int = Field(description="Numero dell'ordine indicato dal cliente")
 
 
 class ElencoOrdini(BaseModel):
     """Nessun argomento: il cliente è già determinato dalla sessione."""
+    model_config = ConfigDict(extra="forbid")
 
 
 @dataclass
@@ -228,13 +249,44 @@ def system_prompt(session: Session | None) -> str:
     return base + (AUTHENTICATED_PROMPT if session else ANONYMOUS_PROMPT)
 
 
+class ValidatedChatOpenAI(ChatOpenAI):
+    def _create_chat_result(self, response, generation_info=None):
+        # Validate only at the wire-format boundary, not around arbitrary tool code.
+        payload = response.model_dump() if hasattr(response, "model_dump") else response
+        try:
+            parsed = ChatCompletion.model_validate(payload)
+            if not parsed.choices:
+                raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
+        except ValidationError as exc:
+            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE) from exc
+        return super()._create_chat_result(response, generation_info)
+
+
 def _build_llm(tools: list[StructuredTool]) -> Any:
-    llm = ChatOpenAI(
+    client = current_provider_client()
+    llm = ValidatedChatOpenAI(
         model=settings.openai_model,
         api_key=settings.openai_api_key,
+        base_url=settings.openai_base_url or None,
         temperature=0,
+        timeout=settings.provider_timeout_seconds,
+        max_retries=0,
+        max_tokens=512,
+        **({"http_async_client": client} if client is not None else {}),
     )
     return llm.bind_tools(tools)
+
+
+async def _invoke_model(model: Any, messages: list[BaseMessage], trace=None) -> AIMessage:
+    async def invoke() -> AIMessage:
+        if trace is not None:
+            trace.llm_calls += 1
+        response = await model.ainvoke(messages)
+        if not isinstance(response, AIMessage):
+            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE, retryable=True)
+        return response
+
+    return await provider_call("model", invoke)
 
 
 async def answer(
@@ -244,8 +296,36 @@ async def answer(
     toolset: Toolset | None = None,
     llm: Any | None = None,
     trace: AgentTrace | None = None,
+    budget: AttemptBudget | None = None,
 ) -> AgentResult:
     """Esegue un giro completo di conversazione e restituisce risposta e fonti."""
+    inherited_budget = current_budget()
+    active_budget = budget or inherited_budget or AttemptBudget(
+        max_attempts=settings.agent_max_attempts,
+        max_retries=settings.agent_retry_budget,
+        deadline_seconds=settings.request_deadline_seconds,
+    )
+    scope = (
+        nullcontext(active_budget)
+        if inherited_budget is active_budget
+        else budget_scope(active_budget)
+    )
+    with scope:
+        try:
+            async with asyncio.timeout(active_budget.remaining_seconds):
+                return await _answer(message, session, history, toolset, llm, trace)
+        except (TimeoutError, RecoverableFailure):
+            return AgentResult(reply=FALLBACK_REPLY)
+
+
+async def _answer(
+    message: str,
+    session: Session | None,
+    history: list[BaseMessage] | None,
+    toolset: Toolset | None,
+    llm: Any | None,
+    trace: AgentTrace | None,
+) -> AgentResult:
     active = toolset if toolset is not None else build_toolset(session)
     chunks: dict[str, Source] = {}
     token = active.retrieved_chunks.set(chunks)
@@ -258,36 +338,91 @@ async def answer(
         messages.append(HumanMessage(content=message))
 
         used: list[str] = []
+        repeated_failures: dict[tuple[str, FailureKind], int] = {}
+        service_failure = False
         for _ in range(settings.agent_max_steps):
-            if trace is not None:
-                trace.llm_calls += 1
-            ai_message: AIMessage = await model.ainvoke(messages)
+            try:
+                ai_message = await _invoke_model(model, messages, trace)
+            except RecoverableFailure:
+                return AgentResult(reply=FALLBACK_REPLY, tools_used=used)
             if trace is not None:
                 usage = getattr(ai_message, "usage_metadata", None) or {}
                 trace.input_tokens += usage.get("input_tokens", 0)
                 trace.output_tokens += usage.get("output_tokens", 0)
             messages.append(ai_message)
 
+            if ai_message.invalid_tool_calls:
+                return AgentResult(reply=FALLBACK_REPLY, tools_used=used)
+
             tool_calls = getattr(ai_message, "tool_calls", None)
             if not tool_calls:
                 reply, sources = validate_citations(_as_text(ai_message.content), chunks)
                 if "cerca_informazioni_negozio" in used and not sources:
-                    reply = UNCITED_REPLY
+                    reply = FALLBACK_REPLY if service_failure else UNCITED_REPLY
                 return AgentResult(reply=reply or FALLBACK_REPLY, sources=sources, tools_used=used)
 
             for call in tool_calls:
+                current_budget().consume()
                 if trace is not None:
                     trace.tool_calls += 1
-                tool = by_name.get(call["name"])
+                name = call.get("name", "") if isinstance(call, dict) else ""
+                call_id = (
+                    call.get("id", "invalid-call")
+                    if isinstance(call, dict)
+                    else "invalid-call"
+                )
+                args = call.get("args", {}) if isinstance(call, dict) else {}
+                tool = by_name.get(name)
+                safe_name = name if tool is not None else "unknown"
+                failure: FailureKind | None = None
+                started = time.perf_counter()
                 if tool is None:
                     if trace is not None:
                         trace.unavailable_tool_calls += 1
-                    output = "Strumento non disponibile per questa conversazione."
+                    failure = FailureKind.UNKNOWN_TOOL
+                    output = tool_failure_message(failure)
                 else:
-                    used.append(call["name"])
-                    output = await tool.ainvoke(call["args"])
-                messages.append(ToolMessage(content=str(output), tool_call_id=call["id"]))
+                    used.append(name)
+                    try:
+                        tool.args_schema.model_validate(args)
+                    except ValidationError:
+                        failure = FailureKind.VALIDATION
+                        output = tool_failure_message(failure)
+                    try:
+                        if failure is None:
+                            output = await tool.ainvoke(args)
+                    except ToolException:
+                        failure = FailureKind.MALFORMED_RESPONSE
+                        output = tool_failure_message(failure)
+                    except RecoverableFailure as exc:
+                        failure = exc.kind
+                        output = tool_failure_message(failure)
+                        service_failure = True
+                        if name == "cerca_informazioni_negozio":
+                            chunks.clear()
+                log_event(
+                    event="tool",
+                    tool=safe_name,
+                    outcome="error" if failure else "ok",
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    failure=failure,
+                )
+                if failure is not None:
+                    key = (safe_name, failure)
+                    repeated_failures[key] = repeated_failures.get(key, 0) + 1
+                    if repeated_failures[key] >= settings.agent_max_repeated_errors:
+                        log_event(
+                            event="agent",
+                            tool=safe_name,
+                            outcome="stopped",
+                            duration_ms=0,
+                            failure=FailureKind.REPEATED_ERROR,
+                        )
+                        return AgentResult(reply=FALLBACK_REPLY, tools_used=used)
+                messages.append(ToolMessage(content=str(output), tool_call_id=call_id))
 
+        log_event(event="agent", outcome="stopped", duration_ms=0,
+                  failure=FailureKind.MAX_STEPS)
         return AgentResult(reply=FALLBACK_REPLY, tools_used=used)
     finally:
         active.retrieved_chunks.reset(token)

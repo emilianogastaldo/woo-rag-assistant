@@ -40,12 +40,15 @@ class RetrievalConfig(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", allow_inf_nan=False)
 
     # LLM (OpenAI)
     openai_api_key: str = ""
     openai_model: str = "gpt-4.1-mini"
     embedding_model: str = "text-embedding-3-small"
+    openai_base_url: str | None = None
+    provider_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
+    provider_retry_attempts: int = Field(default=1, ge=0, le=2)
 
     # Document parsing (LlamaParse / LlamaCloud)
     llama_cloud_api_key: str = ""
@@ -60,6 +63,8 @@ class Settings(BaseSettings):
     wc_sign_url: str = ""
     wc_consumer_key: str = ""
     wc_consumer_secret: str = ""
+    wc_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    wc_retry_attempts: int = Field(default=1, ge=0, le=2)
 
     # ChromaDB
     chroma_host: str = "chromadb"
@@ -85,7 +90,11 @@ class Settings(BaseSettings):
     chunk_overlap: int = 120
 
     # Agente: tetto ai giri di tool calling per singola richiesta
-    agent_max_steps: int = 4
+    agent_max_steps: int = Field(default=4, ge=1, le=12)
+    agent_max_attempts: int = Field(default=12, ge=2, le=50)
+    agent_retry_budget: int = Field(default=2, ge=0, le=8)
+    agent_max_repeated_errors: int = Field(default=2, ge=1, le=5)
+    request_deadline_seconds: float = Field(default=30.0, gt=0, le=180)
 
     # Sessione
     session_secret: str = "change-me-in-production"

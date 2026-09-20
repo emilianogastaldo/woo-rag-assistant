@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.tools.woo_client import WooClient
+from app.resilience import FailureKind, RecoverableFailure
+from app.tools.woo_client import WooClient, shared_woo_client
 
 NOT_FOUND = (
     "Nessun prodotto corrispondente nel catalogo. Comunica che non risulta a "
@@ -40,7 +41,7 @@ def format_product(product: dict[str, Any]) -> str:
 
 class CatalogService:
     def __init__(self, client: WooClient | None = None) -> None:
-        self._woo = client or WooClient()
+        self._woo = client or shared_woo_client()
 
     async def check_availability(self, product: str, limit: int = 3) -> str:
         query = (product or "").strip()
@@ -50,10 +51,14 @@ class CatalogService:
         rows = await self._woo.get_json(
             "products", {"sku": query, "status": "publish", "per_page": 1}
         )
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
         if not rows:
             rows = await self._woo.get_json(
                 "products", {"search": query, "status": "publish", "per_page": limit}
             )
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
         if not rows:
             return NOT_FOUND
         return "\n\n".join(format_product(row) for row in rows)
