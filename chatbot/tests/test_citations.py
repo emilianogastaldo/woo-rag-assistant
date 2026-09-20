@@ -233,26 +233,26 @@ async def test_above_threshold_id_cannot_be_cited():
 
 
 def test_ingestion_writes_deterministic_ids_on_two_runs(monkeypatch):
+    from contextlib import nullcontext
+
     docs = [document("Paragrafo uno. " * 100), document("Resi entro 30 giorni.", "resi")]
 
     async def gather():
         return deepcopy(docs)
 
-    store, client = Mock(), Mock()
+    registry, client = Mock(), Mock()
+    registry.lock.side_effect = lambda name: nullcontext()
     monkeypatch.setattr(ingest, "gather_documents", gather)
-    monkeypatch.setattr(ingest, "get_chroma_client", lambda: client)
-    monkeypatch.setattr(ingest, "get_vector_store", lambda **kwargs: store)
-    ingest.main()
+    ingest.ingest(registry=registry, client=client, embeddings=Mock())
     docs.reverse()
-    ingest.main()
-    first, second = store.add_documents.call_args_list
-    assert set(first.kwargs["ids"]) == set(second.kwargs["ids"])
-    assert len(first.kwargs["ids"]) > 2
+    ingest.ingest(registry=registry, client=client, embeddings=Mock())
+    first, second = registry.build.call_args_list
+    assert {d.id for d in first.args[1]} == {d.id for d in second.args[1]}
+    assert len(first.args[1]) > 2
     for invocation in (first, second):
-        assert len(invocation.kwargs["ids"]) == len(set(invocation.kwargs["ids"]))
-        for doc, identifier in zip(invocation.args[0], invocation.kwargs["ids"], strict=True):
-            assert verified_chunk_id(doc) == doc.id == identifier
-    assert client.delete_collection.call_count == 2
+        for doc in invocation.args[1]:
+            assert verified_chunk_id(doc) == doc.id
+    client.delete_collection.assert_not_called()
 
 
 def test_ids_change_with_text_source_or_position_and_input_is_not_mutated():

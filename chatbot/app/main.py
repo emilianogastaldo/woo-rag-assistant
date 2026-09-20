@@ -40,6 +40,8 @@ from app.conversations import ConversationError, MemoryConversationStore, Memory
 from app.http_clients import provider_client_scope
 from app.observability import correlation, log_event
 from app.privacy import privacy_scope, redact
+from app.rag.versions import VersionError
+from app.readiness import check_readiness
 from app.resilience import AttemptBudget, RecoverableFailure, budget_scope
 from app.tools.woo_client import WooClient, woo_client_scope
 
@@ -177,6 +179,15 @@ async def request_correlation(request: Request, call_next):
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready():
+    try:
+        await check_readiness()
+    except (VersionError, OSError, ValueError, KeyError, TypeError, httpx.HTTPError, TimeoutError):
+        return JSONResponse(status_code=503, content={"status": "not_ready"})
+    return {"status": "ready"}
 
 
 async def demo_login(req: DemoLoginRequest) -> DemoLoginResponse:

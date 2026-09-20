@@ -24,6 +24,7 @@ def get_embeddings() -> OpenAIEmbeddings:
     client = current_provider_client()
     return OpenAIEmbeddings(
         model=settings.embedding_model,
+        dimensions=settings.embedding_dimensions,
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url or None,
         request_timeout=settings.provider_timeout_seconds,

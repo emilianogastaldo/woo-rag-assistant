@@ -1,0 +1,4 @@
+ARG API_IMAGE
+FROM ${API_IMAGE}
+COPY evals/__init__.py evals/issue5_fake_upstream.py evals/issue6_fake_upstream.py evals/issue7_integration.py /evals/
+ENV PYTHONPATH=/

@@ -9,7 +9,7 @@ services:
     volumes:
       - data:/data
   upstream:
-    image: woo-chatbot-chatbot-api:latest
+    image: woo-rag-api:issue7
     pull_policy: never
     environment:
       PYTHONPATH: /app:/
@@ -17,7 +17,7 @@ services:
       - .:/evals:ro
     command: uvicorn evals.issue5_fake_upstream:app --host 0.0.0.0 --port 9000
   api:
-    image: woo-chatbot-chatbot-api:latest
+    image: woo-rag-api:issue7
     pull_policy: never
     environment:
       PYTHONPATH: /app:/
@@ -50,7 +50,7 @@ services:
       - ../chatbot:/app:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
   runner:
-    image: woo-chatbot-chatbot-api:latest
+    image: woo-rag-api:issue7
     pull_policy: never
     user: "${LOCAL_UID:?}:${LOCAL_GID:?}"
     environment:

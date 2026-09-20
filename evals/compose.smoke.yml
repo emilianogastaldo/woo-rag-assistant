@@ -1,7 +1,7 @@
 # Opt-in paid embeddings only, after consent. No connection to the demo network.
 services:
   smoke:
-    image: woo-chatbot-chatbot-api:latest
+    image: woo-rag-api:issue7
     pull_policy: never
     environment:
       PYTHONPATH: /app:/

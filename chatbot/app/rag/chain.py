@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -99,6 +100,10 @@ class KnowledgeBase:
                                            settings.agent_retry_budget,
                                            settings.request_deadline_seconds)):
                 return await self.search(query, k)
+        with self.store.snapshot() if isinstance(self.store, KnowledgeReader) else nullcontext():
+            return await self._search_snapshot(query, k)
+
+    async def _search_snapshot(self, query, k):
         config = self._config or settings.retrieval
         if k is not None:
             config = RetrievalConfig(**{**config.model_dump(), "k": k})

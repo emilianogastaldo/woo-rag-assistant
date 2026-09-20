@@ -35,7 +35,8 @@ WooCommerce → chunking → embedding → ChromaDB.
 - **Chunking**: `RecursiveCharacterTextSplitter` (800/120, configurato in
   `app/config.py`) con metadati `source`/`title`/`type`, `start_index` e `chunk_id`.
   Gli ID deterministici sono anche gli ID dei record Chroma (vedi DEC-010).
-- **Idempotenza**: la collection `woo_knowledge` viene azzerata e riscritta a ogni run.
+- **Versioni immutabili**: candidata con manifest deterministico, validation completa
+  e switch atomico del puntatore; la collection attiva non viene azzerata (DEC-016).
 - Store condiviso con la catena RAG in `app/rag/store.py`.
 
 ## Ambiente di seed
@@ -477,3 +478,34 @@ operativi mantengono soltanto metadata allowlisted; access log Uvicorn disabilit
 per non conservare query string. Proxy e tracing esterni devono rispettare la
 stessa minimizzazione. I test del provider sintetico controllano anche il payload
 HTTP effettivamente ricevuto dal modello, senza conservarlo nei report.
+
+
+### DEC-016 — Collection immutabili e registro POSIX condiviso
+
+L'ingestion acquisisce un lock amministrativo prima del fetch e costruisce una
+collection `kb-<namespace>-<manifest sha256>`. Manifest e collection registrano
+modello, dimensioni e contenuti ordinati, con gli ID di DEC-010. Prima dello switch
+si controllano conteggio, uguaglianza completa dei record, dimensioni/validità dei
+vettori e query strutturale. Nessuna cancellazione dell'attiva precede la build.
+
+Chroma non viene usato come lock distribuito o alias con compare-and-swap: la
+promozione è un `os.replace` di un puntatore persistito con `fsync`, nel volume
+POSIX locale condiviso da API e ingest. Un lock non bloccante serializza gli
+amministratori; processi concorrenti falliscono esplicitamente. Questo contratto
+supporta il deployment Compose su un host, non volumi indipendenti o NFS.
+
+Ogni ricerca mantiene uno snapshot via ContextVar e lock condiviso per l'intero
+retrieval, inclusi BM25 e retry. Promozione/rollback non bloccano quelle già avviate.
+Cleanup con target esatto verifica ownership, protegge attiva/precedente e rifiuta
+la cancellazione in presenza di lettori. Non esiste garbage collection automatica;
+le candidate fallite restano diagnosticabili. Durante cleanup nuove ricerche possono
+ricevere indisponibilità temporanea: eseguirlo come manutenzione separata.
+
+Prima della prima migrazione il reader può continuare a leggere la collection
+legacy, mai scritta dal nuovo ingest. Readiness distingue processo vivo da servizi
+e KB pronti, senza chiamare provider AI. API/ingest installano il wheel completo;
+lock Python e digest Docker sono condivisi fra build, CI e harness locale.
+
+Protocollo, crash recovery, bootstrap e limiti sono descritti nella
+[guida operativa](ingestion-deployment.md). I test su WordPress/Woo e Chroma reali
+usano solo una rete interna e provider deterministici, non dati della demo.

@@ -1,6 +1,8 @@
 """Cancellable read-only Chroma REST adapter; ingestion keeps its own SDK store."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from urllib.parse import quote
 
 import httpx
@@ -9,10 +11,26 @@ from langchain_core.documents import Document
 from app.config import settings
 from app.http_clients import current_provider_client
 from app.rag.store import get_embeddings
+from app.rag.versions import Registry, VersionError
 from app.resilience import FailureKind, RecoverableFailure, parse_retry_after, retry_call
 
 
 class KnowledgeReader:
+    def __init__(self):
+        self._snapshot = ContextVar("knowledge_snapshot", default=None)
+
+    @contextmanager
+    def snapshot(self):
+        try:
+            with Registry().snapshot() as name:
+                token = self._snapshot.set(name)
+                try:
+                    yield
+                finally:
+                    self._snapshot.reset(token)
+        except (VersionError, OSError, ValueError) as exc:
+            raise RecoverableFailure(FailureKind.CHROMA_UNAVAILABLE) from exc
+
     async def _request(self, method, path, payload=None):
         client = current_provider_client()
         if client is None:
@@ -48,8 +66,12 @@ class KnowledgeReader:
                                 timeout_seconds=settings.provider_timeout_seconds, idempotent=True)
 
     async def _collection(self):
-        # Resolve for each read: never query a stale collection after replacement.
-        result = await self._request("GET", quote(settings.chroma_collection, safe=""))
+        # The search pins one immutable generation across BM25, vectors and retries.
+        name = self._snapshot.get()
+        if name is None:
+            with self.snapshot():
+                return await self._collection()
+        result = await self._request("GET", quote(name, safe=""))
         identifier = result.get("id")
         if not isinstance(identifier, str) or not identifier:
             raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)

@@ -6,13 +6,14 @@ Flusso:
   1. Legge prodotti (WC REST, OAuth) e pagine informative (WP REST, pubbliche).
   2. Estrae testo pulito dall'HTML (BeautifulSoup).
   3. Chunking (RecursiveCharacterTextSplitter) con metadati per la citazione fonti.
-  4. Embedding OpenAI -> scrittura idempotente nella collection ChromaDB.
+  4. Embedding -> candidata immutabile, validation -> promozione atomica.
 
 Solo conoscenza *statica*: descrizioni prodotti e pagine di policy/FAQ. Lo stato
 dinamico (stock, ordini) è servito dai tool, non dal RAG.
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 
 import httpx
@@ -21,7 +22,8 @@ from langchain_core.documents import Document
 
 from app.config import settings
 from app.rag.chunks import split_documents
-from app.rag.store import get_chroma_client, get_vector_store
+from app.rag.store import get_chroma_client, get_embeddings
+from app.rag.versions import Registry, VersionError
 from app.tools.woo_client import WooClient
 
 # Pagine WP da includere come knowledge base: esclude quelle di sistema di
@@ -64,8 +66,9 @@ async def fetch_page_docs() -> list[Document]:
     # Le pagine WP sono pubbliche: nessuna firma OAuth necessaria.
     root = settings.wc_base_url.split("/wp-json/")[0]
     url = f"{root}/wp-json/wp/v2/pages"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(url, params={"per_page": 100, "status": "publish"})
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+        response = await client.get(url, params={"per_page": 100, "status": "publish",
+                                                 "slug": ",".join(KNOWLEDGE_PAGE_SLUGS)})
         response.raise_for_status()
         pages = response.json()
 
@@ -90,27 +93,33 @@ async def gather_documents() -> list[Document]:
     return products + pages
 
 
+def ingest(*, registry=None, client=None, embeddings=None, promote=True):
+    registry = registry or Registry()
+    with registry.lock("admin"):
+        docs = asyncio.run(gather_documents())
+        if not docs:
+            raise VersionError("Empty source corpus; active version preserved")
+        return registry.build(client or get_chroma_client(), split_documents(docs),
+                              embeddings or get_embeddings(), promote=promote)
+
+
 def main() -> None:
-    print("[ingest] Raccolta documenti da WooCommerce/WP...")
-    docs = asyncio.run(gather_documents())
-    if not docs:
-        print("[ingest] Nessun documento trovato: interrompo.")
-        return
-
-    chunks = split_documents(docs)
-    print(f"[ingest] {len(chunks)} chunk dopo lo splitting")
-
-    # Reset idempotente: azzera la collection prima di reindicizzare.
-    client = get_chroma_client()
-    try:
-        client.delete_collection(settings.chroma_collection)
-        print(f"[ingest] collection '{settings.chroma_collection}' azzerata")
-    except Exception:
-        pass
-
-    store = get_vector_store(client=client)
-    store.add_documents(chunks, ids=[doc.metadata["chunk_id"] for doc in chunks])
-    print(f"[ingest] Indicizzati {len(chunks)} chunk in '{settings.chroma_collection}'. Fatto.")
+    parser = argparse.ArgumentParser(description="Versioned ingestion and explicit recovery")
+    parser.add_argument("action", nargs="?", default="build",
+                        choices=["build", "promote", "rollback", "cleanup", "status"])
+    parser.add_argument("--target", help="Exact collection name; no wildcard or automatic pruning")
+    parser.add_argument("--candidate-only", action="store_true")
+    args = parser.parse_args()
+    registry = Registry()
+    if args.action == "status":
+        print(registry.status())
+    elif args.action == "build":
+        print(ingest(registry=registry, promote=not args.candidate_only))
+    else:
+        if not args.target:
+            parser.error("--target is required")
+        getattr(registry, args.action)(get_chroma_client(), args.target)
+        print(f"{args.action}: completed")
 
 
 if __name__ == "__main__":
