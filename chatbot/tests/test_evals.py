@@ -55,7 +55,10 @@ def test_cli_opt_in_and_estimate_do_not_construct_clients(monkeypatch, capsys):
     assert exc.value.code == 2
     assert main(["--live", "--estimate", "--repeats", "3"]) == 0
     text = capsys.readouterr().out
-    assert json.loads(text)["generation_requests_max"] == 360
+    estimate_result = json.loads(text)
+    assert estimate_result["generation_requests_max"] == 540
+    assert estimate_result["external_attempts_max"] == 1080
+    assert estimate_result["shared_retries_max"] == 180
     with pytest.raises(SystemExit):
         main(["--repeats", "0"])
 
@@ -275,7 +278,9 @@ async def test_trace_counts_tokens_and_unavailable_calls():
     result = await answer("ordine", toolset=toolset, llm=Model(), trace=trace)
     assert result.tools_used == []
     assert replace(trace) == AgentTrace(2, 1, 1, 20, 10)
-    assert estimate(30, 3, 4)["embedding_requests_max"] == 361
+    budget = estimate(30, 3, 4)
+    assert budget["embedding_requests_max"] == 1081
+    assert budget["external_attempts_max"] == 1080
 
 
 async def test_live_cosine_ranking_with_fake_embeddings():

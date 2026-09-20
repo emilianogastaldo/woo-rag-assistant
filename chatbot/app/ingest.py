@@ -34,8 +34,8 @@ def html_to_text(html: str | None) -> str:
 
 
 async def fetch_product_docs() -> list[Document]:
-    woo = WooClient()
-    products = await woo.get_all("products", {"status": "publish"})
+    async with WooClient() as woo:
+        products = await woo.get_all("products", {"status": "publish"})
     docs: list[Document] = []
     for p in products:
         body = "\n\n".join(

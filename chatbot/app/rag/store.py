@@ -11,6 +11,8 @@ from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 
 from app.config import settings
+from app.http_clients import current_provider_client
+from app.resilience import FailureKind, RecoverableFailure
 
 # Distanza coseno invece della L2 di default: il punteggio resta in [0, 2] ed è
 # interpretabile (0 = identico), quindi la soglia di pertinenza del RAG è
@@ -19,11 +21,26 @@ COLLECTION_METADATA = {"hnsw:space": "cosine"}
 
 
 def get_embeddings() -> OpenAIEmbeddings:
-    return OpenAIEmbeddings(model=settings.embedding_model, api_key=settings.openai_api_key)
+    client = current_provider_client()
+    return OpenAIEmbeddings(
+        model=settings.embedding_model,
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_base_url or None,
+        request_timeout=settings.provider_timeout_seconds,
+        max_retries=0,
+        check_embedding_ctx_length=False,
+        **({"http_async_client": client} if client is not None else {}),
+    )
 
 
 def get_chroma_client() -> chromadb.api.ClientAPI:
-    return chromadb.HttpClient(host=settings.chroma_host, port=settings.chroma_port)
+    try:
+        return chromadb.HttpClient(host=settings.chroma_host, port=settings.chroma_port)
+    except ValueError as exc:
+        # Chroma wraps its initial httpx connection failure in ValueError.
+        raise RecoverableFailure(
+            FailureKind.CHROMA_UNAVAILABLE, retryable=True
+        ) from exc
 
 
 def get_vector_store(

@@ -65,12 +65,13 @@ sintetici, mentre il modello sceglie liberamente i tool. Il caso tool indisponib
 verifica il rifiuto dell'ospite nel live; lo script offline forza esplicitamente una
 chiamata a un tool assente per esercitare quel ramo del loop.
 
-Costo: con N casi, R ripetizioni e S=`AGENT_MAX_STEPS`, al massimo N×R×S richieste di
-generazione e 1+N×R×S richieste embedding (un batch iniziale per gli 8 documenti).
-Tool calling parallelo disabilitato, retry SDK disabilitati, timeout 30 secondi e
-massimo 512 token generati per chiamata. Con 30 casi, 3 ripetizioni e S=4: fino a
-360 richieste di generazione, 361 di embedding, 184.320 token di output; **ogni run**
-prima/dopo ha questo budget. Non ci sono chiamate a un LLM judge.
+Costo: `--estimate` calcola limiti conservativi usando step, tentativi e retry
+condivisi. Con 30 casi × 3 e i default #5: al massimo 1.080 unità di budget per
+run (incluse le operazioni locali contabilizzate), fino a 540 richieste modello
+e 276.480 token output. Il tetto embedding conservativo è 1.081 includendo il
+batch iniziale del corpus. Questi massimi per categoria non si sommano: modello,
+embedding, tool e retry competono per il medesimo budget. Retry SDK zero, output
+512 token/chiamata e deadline 30 s/turno. Non ci sono chiamate a un LLM judge.
 
 Il costo monetario dipende dai token di input (prompt/storia/tool inclusi), output
 ed embedding e dalle tariffe del modello scelto: `input_tokens × prezzo_input +
@@ -81,6 +82,28 @@ embedding. Una temperatura zero non rende le risposte live deterministiche:
 confrontare più ripetizioni e interpretare le variazioni prima di attribuirle al codice.
 Gli ID espliciti e le istruzioni di citazione aumentano i token di input/output:
 il numero massimo di chiamate rimane invariato, il costo per risposta può aumentare.
+
+Dalla #5 la stima usa anche `AGENT_MAX_ATTEMPTS` e `AGENT_RETRY_BUDGET`: il primo
+è il tetto conservativo di tentativi e dispatch per turno, il secondo è condiviso da
+riformulazione retrieval, HTTP e provider. I prodotti dei massimi locali non sono
+considerati spendibili: ogni retry deve rientrare nel budget globale.
+
+## Integrazione locale #5
+
+```bash
+python3 evals/run_issue5_integration.py
+```
+
+Usa soltanto immagini già presenti: API HTTP reale, provider/Woo HTTP deterministici
+e Chroma reale sulla rete interna di un progetto nuovo. Nessuna porta pubblicata,
+nessun `.env` demo, collection e volumi nuovi. L'harness verifica mount, endpoint,
+credenziali sintetiche, nomi e cleanup. Copre timeout, 429/Retry-After, deadline,
+4xx/5xx, payload Woo/modello malformati, riuso connessione, scoping ordini e assenza
+di segreti nei log. Arresta/riavvia solo Chroma del run e sostituisce il corpus con
+lo stesso numero di record, verificando che vengano citati soltanto i nuovi ID.
+Gli inventari includono commit base, hash dell'implementazione non committata e
+fixture; report e metriche temporali rimangono gitignored. Il blocco di rete
+ordinario di pytest non viene modificato.
 
 ## Metriche e confronto
 

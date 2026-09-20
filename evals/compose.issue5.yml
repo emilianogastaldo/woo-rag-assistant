@@ -1,0 +1,66 @@
+# Isolated local integration: synthetic credentials and internal-only traffic.
+services:
+  chroma:
+    image: chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6
+    pull_policy: never
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+      IS_PERSISTENT: "TRUE"
+    volumes:
+      - data:/data
+  upstream:
+    image: woo-chatbot-chatbot-api:latest
+    pull_policy: never
+    environment:
+      PYTHONPATH: /app:/
+    volumes:
+      - .:/evals:ro
+    command: uvicorn evals.issue5_fake_upstream:app --host 0.0.0.0 --port 9000
+  api:
+    image: woo-chatbot-chatbot-api:latest
+    pull_policy: never
+    environment:
+      PYTHONPATH: /app:/
+      OPENAI_API_KEY: synthetic-secret
+      OPENAI_MODEL: synthetic-chat
+      EMBEDDING_MODEL: synthetic-embedding
+      OPENAI_BASE_URL: http://upstream:9000/v1
+      PROVIDER_TIMEOUT_SECONDS: "0.2"
+      PROVIDER_RETRY_ATTEMPTS: "1"
+      WC_BASE_URL: http://upstream:9000/wp-json/wc/v3
+      WC_SIGN_URL: http://upstream:9000/wp-json/wc/v3
+      WC_CONSUMER_KEY: synthetic-key
+      WC_CONSUMER_SECRET: synthetic-secret
+      WC_TIMEOUT_SECONDS: "0.2"
+      WC_RETRY_ATTEMPTS: "1"
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      CHROMA_COLLECTION: "${TEST_COLLECTION:?}"
+      RETRIEVAL_MAX_DISTANCE: "0.6"
+      RETRIEVAL_STRATEGY: hybrid
+      AGENT_MAX_ATTEMPTS: "12"
+      AGENT_RETRY_BUDGET: "2"
+      REQUEST_DEADLINE_SECONDS: "1.5"
+      SESSION_SECRET: synthetic-session
+      LANGCHAIN_TRACING_V2: "false"
+      ANONYMIZED_TELEMETRY: "false"
+    volumes:
+      - ../chatbot:/app:ro
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+  runner:
+    image: woo-chatbot-chatbot-api:latest
+    pull_policy: never
+    user: "${LOCAL_UID:?}:${LOCAL_GID:?}"
+    environment:
+      PYTHONPATH: /app:/
+      CHROMA_COLLECTION: "${TEST_COLLECTION:?}"
+    volumes:
+      - ../chatbot:/app:ro
+      - .:/evals:ro
+      - ${ISSUE5_RESULTS:?}:/results
+    command: python -m evals.issue5_integration --phase healthy
+networks:
+  default:
+    internal: true
+volumes:
+  data:

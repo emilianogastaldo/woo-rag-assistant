@@ -12,7 +12,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from app.tools.woo_client import WooClient
+from app.resilience import FailureKind, RecoverableFailure
+from app.tools.woo_client import WooClient, shared_woo_client
 
 ORDER_NOT_FOUND = (
     "Nessun ordine con questo numero risulta associato all'account. "
@@ -112,7 +113,7 @@ class OrderService:
 
     def __init__(self, customer_id: int, client: WooClient | None = None) -> None:
         self._customer_id = int(customer_id)
-        self._woo = client or WooClient()
+        self._woo = client or shared_woo_client()
 
     def _belongs_to_customer(self, order: dict[str, Any]) -> bool:
         return int(order.get("customer_id", 0)) == self._customer_id
@@ -127,6 +128,8 @@ class OrderService:
             "orders",
             {"customer": self._customer_id, "include": wanted, "per_page": 1},
         )
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
         for order in rows or []:
             if int(order.get("id", 0)) == wanted and self._belongs_to_customer(order):
                 return format_order(order)
@@ -137,6 +140,8 @@ class OrderService:
             "orders",
             {"customer": self._customer_id, "per_page": limit, "orderby": "date", "order": "desc"},
         )
+        if not isinstance(rows, list) or any(not isinstance(order, dict) for order in rows):
+            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
         owned = [order for order in rows or [] if self._belongs_to_customer(order)]
         if not owned:
             return NO_ORDERS

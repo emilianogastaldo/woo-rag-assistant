@@ -15,12 +15,34 @@ import hashlib
 import hmac
 import secrets
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
 from app.config import settings
+from app.resilience import FailureKind, RecoverableFailure, parse_retry_after, retry_call
+from app.tools.payloads import validate_rows
+
+_active_woo_client: ContextVar[WooClient | None] = ContextVar(
+    "active_woo_client", default=None
+)
+
+
+@contextmanager
+def woo_client_scope(client: WooClient) -> Iterator[None]:
+    token = _active_woo_client.set(client)
+    try:
+        yield
+    finally:
+        _active_woo_client.reset(token)
+
+
+def shared_woo_client() -> WooClient:
+    return _active_woo_client.get() or WooClient()
 
 
 class WooClient:
@@ -31,13 +53,20 @@ class WooClient:
         sign_url: str | None = None,
         consumer_key: str | None = None,
         consumer_secret: str | None = None,
-        timeout: float = 30.0,
+        timeout: float | None = None,
+        retry_attempts: int | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self._base = (base_url or settings.wc_base_url).rstrip("/")
         self._sign_base = (sign_url or settings.wc_signing_base).rstrip("/")
         self._ck = consumer_key or settings.wc_consumer_key
         self._cs = consumer_secret or settings.wc_consumer_secret
-        self._timeout = timeout
+        self._timeout = timeout or settings.wc_timeout_seconds
+        self._retry_attempts = (
+            settings.wc_retry_attempts if retry_attempts is None else retry_attempts
+        )
+        self._client = client or httpx.AsyncClient(timeout=self._timeout, trust_env=False)
+        self._owns_client = client is None
 
     @staticmethod
     def _percent(value: Any) -> str:
@@ -69,14 +98,52 @@ class WooClient:
 
     async def get(self, path: str, params: dict | None = None) -> httpx.Response:
         url = f"{self._base}/{path.lstrip('/')}"
-        signed = self._signed_params("GET", path, params)
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(url, params=signed)
-            response.raise_for_status()
+        async def request() -> httpx.Response:
+            # A fresh OAuth nonce/signature is required on every retry.
+            signed = self._signed_params("GET", path, params)
+            try:
+                response = await self._client.get(url, params=signed)
+            except httpx.TimeoutException as exc:
+                raise RecoverableFailure(FailureKind.TIMEOUT, retryable=True) from exc
+            except httpx.TransportError as exc:
+                raise RecoverableFailure(FailureKind.HTTP_SERVER, retryable=True) from exc
+            if response.status_code == 429:
+                raise RecoverableFailure(
+                    FailureKind.RATE_LIMIT,
+                    retryable=True,
+                    retry_after=parse_retry_after(response.headers.get("Retry-After")),
+                )
+            if 500 <= response.status_code:
+                raise RecoverableFailure(FailureKind.HTTP_SERVER, retryable=True)
+            if 400 <= response.status_code:
+                raise RecoverableFailure(FailureKind.HTTP_CLIENT)
             return response
 
+        return await retry_call(
+            "woo_http",
+            request,
+            max_retries=self._retry_attempts,
+            timeout_seconds=self._timeout,
+            idempotent=True,
+        )
+
     async def get_json(self, path: str, params: dict | None = None) -> Any:
-        return (await self.get(path, params)).json()
+        response = await self.get(path, params)
+        try:
+            rows = response.json()
+        except ValueError as exc:
+            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE) from exc
+        return validate_rows(path, rows)
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def __aenter__(self) -> WooClient:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        await self.aclose()
 
     async def get_all(
         self, path: str, params: dict | None = None, per_page: int = 100

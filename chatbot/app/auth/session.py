@@ -20,7 +20,8 @@ import time
 from dataclasses import dataclass
 
 from app.config import settings
-from app.tools.woo_client import WooClient
+from app.resilience import FailureKind, RecoverableFailure
+from app.tools.woo_client import WooClient, shared_woo_client
 
 # Clienti demo creati da seed/seed.php (chiave -> email).
 DEMO_CUSTOMERS: dict[str, str] = {
@@ -85,8 +86,10 @@ async def resolve_customer_id(email: str, client: WooClient | None = None) -> in
     if email in _customer_id_cache:
         return _customer_id_cache[email]
 
-    woo = client or WooClient()
+    woo = client or shared_woo_client()
     rows = await woo.get_json("customers", {"email": email, "role": "all", "per_page": 1})
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
     if not rows:
         return None
     customer_id = int(rows[0]["id"])

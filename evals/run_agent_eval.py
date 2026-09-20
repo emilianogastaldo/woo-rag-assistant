@@ -47,16 +47,24 @@ HERE = Path(__file__).resolve().parent
 
 def estimate(case_count, repeats, max_steps):
     turns = case_count * repeats
+    per_turn_attempts = settings.agent_max_attempts
+    per_turn_retries = settings.agent_retry_budget
+    generation_max = min(per_turn_attempts, max_steps + per_turn_retries,
+                         max_steps * (1 + settings.provider_retry_attempts))
     return {
         "cases": case_count,
         "repeats": repeats,
         "turns": turns,
-        "generation_requests_max": turns * max_steps,
-        "embedding_requests_max": 1 + turns * max_steps * (1 + settings.retrieval_retry_attempts),
-        "generation_output_tokens_max": turns * max_steps * 512,
+        "generation_requests_max": turns * generation_max,
+        "embedding_requests_max": 1 + turns * per_turn_attempts,
+        "external_attempts_max": turns * per_turn_attempts,
+        "shared_retries_max": turns * per_turn_retries,
+        "generation_output_tokens_max": turns * generation_max * 512,
         "corpus_embedding_requests": 1,
-        "retries": 0,
-        "retrieval_retries_max": turns * max_steps * settings.retrieval_retry_attempts,
+        "provider_retry_attempts_per_operation": settings.provider_retry_attempts,
+        "retrieval_retries_max": turns * min(
+            per_turn_retries, max_steps * settings.retrieval_retry_attempts
+        ),
         "note": "Cost depends on input/output and embedding tokens and provider prices. No judge.",
     }
 
@@ -138,6 +146,9 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False, commit=No
             "retrieval_k": settings.retrieval_k,
             "retrieval_max_distance": settings.retrieval_max_distance,
             "agent_max_steps": settings.agent_max_steps,
+            "agent_max_attempts": settings.agent_max_attempts,
+            "agent_retry_budget": settings.agent_retry_budget,
+            "request_deadline_seconds": settings.request_deadline_seconds,
             "as_of": AS_OF,
             "model_digest": digest(settings.openai_model) if live else None,
             "embedding_model_digest": digest(settings.embedding_model) if live else None,
