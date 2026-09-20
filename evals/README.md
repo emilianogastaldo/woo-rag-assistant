@@ -285,3 +285,30 @@ completo e ricalcola BM25/fusione/gate. Non aggiorna vettori, non riprova Chroma
 non effettua chiamate esterne e non sovrascrive la registrazione originale.
 Risultati, regressione trovata nel retry e decisione finale in
 [`docs/issue-4-results.md`](../docs/issue-4-results.md).
+
+
+## Issue #6: sessioni, history e widget
+
+```bash
+python3 evals/run_issue6_integration.py
+```
+
+Il runner non legge `.env`: crea un progetto/collection/volume univoci, controlla
+nomi, mount, endpoint, immagini, assenza di porte e rete `internal`, poi avvia tre
+processi API (demo, production senza demo, limiti ridotti), Chroma e provider
+Woo/OpenAI-compatible sintetici. Due ulteriori avvii production devono fallire con
+secret vuoto/predefinito. Riavvia soltanto la propria API per verificare perdita
+history e prova accesso da un altro processo allo stesso ID. Cache, TTL, rate limit,
+ordini incrociati e payload modello vengono verificati via HTTP.
+
+`widget_security.mjs` esegue il JS del widget in un DOM minimale Node contro l'API
+reale sulla rete interna: contratto, login/logout, scadenza, risposta tardiva e
+isolamento identità. **Non è un browser né una verifica visuale**: non prova layout,
+policy cookie/CORS del browser o rendering. Richiede l'immagine locale
+`node:22-alpine` oltre alle immagini API/Chroma; nessun download automatico.
+
+I report sotto `evals/results/woo-issue6-*/` contengono inventario, hash codice/
+fixture, esiti, durata e contatori sintetici senza payload, token o email. Il numero
+di token dell'adapter è convenzionale, non tokenizzazione reale né consumo a
+pagamento. Cleanup verificato del solo progetto del run. Live esterno non eseguito:
+nessuna autorizzazione API/spesa è implicita nel lancio di questo harness.

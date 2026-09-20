@@ -18,7 +18,8 @@
     busy: false,
     token: null,
     customerLabel: null,
-    history: [],
+    conversationId: null,
+    epoch: 0,
   };
 
   const STYLES = `
@@ -81,6 +82,12 @@
   const custABtn = el("button", null, "Accedi come Mario");
   const custBBtn = el("button", null, "Accedi come Luigi");
   auth.append(guestBtn, custABtn, custBBtn);
+  auth.hidden = true;
+  auth.style.display = "none";
+  fetch(API + "/session/config").then(r => r.json()).then(config => {
+    auth.hidden = !config.demo_enabled;
+    auth.style.display = config.demo_enabled ? "flex" : "none";
+  }).catch(() => {});
 
   const log = el("div", "wrag-log");
 
@@ -154,12 +161,15 @@
   }
 
   function resetConversation(note) {
-    state.history = [];
+    state.conversationId = null;
+    state.epoch += 1;
     log.replaceChildren();
     addMessage("bot", note);
   }
 
   async function login(key, label) {
+    logout();
+    const epoch = state.epoch;
     try {
       const response = await fetch(API + "/demo/login", {
         method: "POST",
@@ -168,6 +178,7 @@
       });
       if (!response.ok) throw new Error("login non riuscito");
       const data = await response.json();
+      if (epoch !== state.epoch) return;
       state.token = data.token;
       state.customerLabel = label;
       setSessionLabel();
@@ -175,6 +186,7 @@
         "Bentornato/a " + label + ". Posso controllare i tuoi ordini e le informazioni del negozio."
       );
     } catch (error) {
+      if (epoch !== state.epoch) return;
       addMessage("error", "Login demo non riuscito: " + error.message);
     }
   }
@@ -189,6 +201,7 @@
   }
 
   async function ask(message) {
+    const epoch = state.epoch;
     const typing = el("div", "wrag-typing", "sto cercando…");
     log.appendChild(typing);
     scrollDown();
@@ -200,25 +213,36 @@
       const response = await fetch(API + "/chat", {
         method: "POST",
         headers: headers,
-        body: JSON.stringify({ message: message, history: state.history }),
+        credentials: "include",
+        body: JSON.stringify({ message: message, conversation_id: state.conversationId }),
       });
       typing.remove();
+      if (epoch !== state.epoch) return;
 
       if (response.status === 401) {
-        state.token = null;
-        setSessionLabel();
+        logout();
         addMessage("error", "Sessione scaduta: accedi di nuovo.");
+        return;
+      }
+      if ([404, 409].includes(response.status)) {
+        resetConversation("Conversazione scaduta o conclusa: invia di nuovo la domanda.");
+        return;
+      }
+      if (response.status === 429) {
+        addMessage("error", "Troppe richieste: attendi " +
+          (response.headers.get("Retry-After") || "60") + " secondi.");
         return;
       }
       if (!response.ok) throw new Error("HTTP " + response.status);
 
       const data = await response.json();
+      if (epoch !== state.epoch) return;
+      state.conversationId = data.conversation_id;
       addMessage("bot", data.reply, data.sources);
       addSources(data.sources);
-      state.history.push({ role: "user", content: message });
-      state.history.push({ role: "assistant", content: data.reply });
     } catch (error) {
       typing.remove();
+      if (epoch !== state.epoch) return;
       addMessage("error", "Non riesco a contattare l'assistente (" + error.message + ").");
     }
   }

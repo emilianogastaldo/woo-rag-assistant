@@ -40,7 +40,9 @@ class RetrievalConfig(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", allow_inf_nan=False)
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", allow_inf_nan=False, hide_input_in_errors=True
+    )
 
     # LLM (OpenAI)
     openai_api_key: str = ""
@@ -98,17 +100,49 @@ class Settings(BaseSettings):
 
     # Sessione
     session_secret: str = "change-me-in-production"
-    session_ttl_seconds: int = 28800
+    session_ttl_seconds: int = Field(default=28800, ge=1)
+    app_env: Literal["development", "production"] = "development"
+    demo_enabled: bool = False
+    conversation_ttl_seconds: int = Field(default=1800, ge=1)
+    conversation_capacity: int = Field(default=1000, ge=1)
+    conversation_max_turns: int = Field(default=20, ge=1, le=100)
+    message_max_bytes: int = Field(default=4000, ge=1, le=16000)
+    history_max_bytes: int = Field(default=16000, ge=1, le=100000)
+    chat_body_max_bytes: int = Field(default=24000, ge=256, le=200000)
+    model_context_max_bytes: int = Field(default=32000, ge=1, le=200000)
+    model_token_budget: int = Field(default=100000, ge=1, le=1000000)
+    model_max_output_tokens: int = Field(default=512, ge=1, le=4096)
+    tool_output_max_bytes: int = Field(default=12000, ge=1, le=100000)
+    customer_cache_ttl_seconds: int = Field(default=300, ge=1)
+    customer_cache_capacity: int = Field(default=1000, ge=1)
+    rate_limit_requests: int = Field(default=20, ge=1)
+    rate_limit_window_seconds: int = Field(default=60, ge=1)
+    rate_limit_capacity: int = Field(default=10000, ge=1)
 
     # Origini ammesse per il widget (CORS), separate da virgola
     cors_origins: str = "http://localhost:8080,http://localhost:8000"
 
+    @model_validator(mode="after")
+    def validate_security(self):
+        if self.app_env == "production":
+            if len(self.session_secret.strip()) < 32 or self.session_secret.strip().lower() in {
+                "change-me-in-production",
+                "change-me",
+                "changeme",
+                "replace-with-a-random-secret-at-least-32-characters",
+            }:
+                raise ValueError(
+                    "Production requires a non-default SESSION_SECRET of 32+ characters"
+                )
+            if self.demo_enabled:
+                raise ValueError("Demo login is forbidden in production")
+        return self
+
     @property
     def retrieval(self) -> RetrievalConfig:
-        return RetrievalConfig(**{
-            name: getattr(self, f"retrieval_{name}")
-            for name in RetrievalConfig.model_fields
-        })
+        return RetrievalConfig(
+            **{name: getattr(self, f"retrieval_{name}") for name in RetrievalConfig.model_fields}
+        )
 
     @model_validator(mode="after")
     def validate_retrieval(self):

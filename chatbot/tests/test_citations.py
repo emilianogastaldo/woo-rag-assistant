@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from copy import deepcopy
 from unittest.mock import Mock
 
@@ -90,7 +91,8 @@ async def test_multiple_rag_calls_keep_only_cited_chunks_and_no_duplicates():
     assert result.sources[0]["chunk_ids"] == [IDS[0]]
     assert len(result.sources) == 1
     assert result.tools_used == [RAG] * 3
-    outputs = [m.content for m in llm.seen[-1] if isinstance(m, ToolMessage)]
+    outputs = [json.loads(m.content)["untrusted_data"]
+               for m in llm.seen[-1] if isinstance(m, ToolMessage)]
     assert outputs == [f"[{IDS[i]}] {CHUNKS[i].page_content}" for i in (0, 2, 0)]
 
 

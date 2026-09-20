@@ -237,7 +237,7 @@ rimuove quelli non presenti nel registro e raggruppa i validi per URL e tipo.
 Ordine delle fonti e degli ID: prima citazione nel testo. Ogni fonte HTTP contiene
 `title`, `url`, `type`, `chunk_ids` (solo ID citati, senza ripetizioni). Più ricerche
 e più chunk dello stesso documento non moltiplicano le fonti. Il widget usa questa
-mappa per riferimenti numerati, mantiene gli ID originali nella cronologia e rende
+mappa per riferimenti numerati, usa gli ID originali per le fonti; la history autorevole è server-side e rende
 testo/etichette con nodi DOM; sono cliccabili solo URL HTTP(S).
 
 **Policy senza citazioni:** dopo qualsiasi chiamata RAG, se nessuna citazione è
@@ -395,3 +395,85 @@ timeout, 429, 4xx, 5xx e JSON malformato, misura il limite temporale, verifica r
 del client e arresta/riavvia soltanto il Chroma dedicato. Collection, volume,
 credenziali e nomi sono sintetici; nessuna porta è pubblicata e il cleanup rimuove
 soltanto il progetto creato dal run.
+
+### DEC-014 — History autorevole e identità della conversazione (#6)
+
+Il browser invia soltanto `message` e `conversation_id`; Pydantic rifiuta campi
+extra, inclusi history e ruoli. L'ID è casuale (32 byte, base64url), creato dal
+server e verificato insieme all'owner. Un ID ignoto, scaduto o appartenente ad
+altra sessione restituisce lo stesso 404. L'owner autenticato è un digest del
+token firmato completo e del customer ID risolto: nuove emissioni e cambi nella
+mappatura email→ID non ereditano la history. Il token include un nonce casuale.
+L'owner anonimo deriva da un cookie ospite firmato con subject in namespace
+`guest:`, mai da un valore di identità arbitrario inviato nel body.
+
+`ConversationStore` espone acquisizione, commit e rilascio. L'implementazione
+`MemoryConversationStore` verifica owner, TTL assoluto, turni, capienza e flag busy
+senza await fra controllo e acquisizione nel singolo event loop. Una seconda
+richiesta sullo stesso ID riceve 409; il finally rilascia anche su errori o
+cancellazione. Il commit salva solo user e risposta finale del server, non tool
+message o messaggi assistant del client. La history elimina coppie intere dalla
+coda più vecchia per rispettare il limite in byte, senza resettare i turni.
+
+Default e status sono nella tabella del README e in `.env.example`. Nessuna
+espulsione delle conversazioni attive per accettarne di nuove: a capienza piena
+503. Il provider riceve contesto limitato e output massimo; ogni chiamata fisica,
+incluso ogni retry, prenota dal budget generazione byte UTF-8 serializzati dei
+messaggi, overhead per messaggio/schema e massimo output token. È una stima
+conservativa per i tokenizer byte-pair usati, non telemetria né costo misurato.
+Contesto/budget esaurito restituiscono il fallback stabile. I token embedding non
+consumano questo budget, ma input, dispatch, retry e deadline restano limitati.
+
+Lo store è volutamente volatile e per processo: un worker per v1. Riavvio/reload
+perde history e quote; un altro worker non ha la conversazione e restituisce 404.
+La futura sostituzione deve rendere atomici owner/TTL/busy/commit e condividere
+anche il rate limiter; sticky session da sola non rende globali quote e capienza.
+Cache email→ID: TTL fisso monotono, accesso LRU e rimozione prima dell'inserimento,
+con capienza globale per processo. Nessuna cache di errori o clienti inesistenti.
+
+### DEC-015 — Demo esplicita, minimizzazione dati e limiti HTTP (#6)
+
+`DEMO_ENABLED=false` è il default: la route `/demo/login` non viene registrata.
+Production rifiuta secret vuoto/predefinito/corto e qualunque attivazione demo.
+`development` è un ambiente locale, non un'alternativa al controllo production.
+L'emissione token tramite un'identità Woo/SSO realmente verificata resta a carico
+dell'integrazione di deployment. Il token demo è restituito solo al login e non
+viene usato come prova che il chiamante sia il cliente reale del negozio.
+
+Il widget scopre il flag con `/session/config`, conserva il token solo in memoria,
+azzera conversazione e DOM ad ogni cambio sessione e usa una generazione numerica
+per scartare login/risposte tardivi. 401 azzera l'identità, 404/409 la conversazione,
+429 mostra l'attesa senza replay automatico. Cookie ospite HttpOnly, SameSite=Lax,
+Secure in production: widget/API sullo stesso site o proxy sul dominio negozio.
+Il logout del widget elimina il token locale; non è revoca server-side di token
+copiati, che restano validi fino alla scadenza. Ruotare il secret invalida tutti.
+
+Il limite `/chat` precede autenticazione e parsing JSON, comprende richieste
+invalide e usa digest del peer di rete: finestra fissa e `Retry-After` su 429.
+Il body è letto per chunk entro una dimensione massima; errori di validazione
+non includono input o segreti. Middleware CORS esterno applica gli header anche
+ai rifiuti anticipati. Con `--no-proxy-headers`, X-Forwarded-For non permette di
+cambiare quota. Dietro proxy applicare quote al proxy su IP verificati; altrimenti
+il backend vede un solo peer condiviso. Il rate limiter non rimuove chiavi attive
+per fare spazio a nuove identità; a capienza piena rifiuta temporaneamente.
+
+Gli output tool (inclusi documenti e campi Woo) entrano nel modello solo come
+`ToolMessage` con oggetto JSON `untrusted_data`. Le istruzioni di sistema indicano
+che i valori sono evidenze non fidate; eventuali delimitatori o ruoli sono stringhe
+JSON, non nuovi messaggi. Questa delimitazione non dimostra resistenza semantica
+del modello: la sicurezza degli ordini rimane nei controlli di autorizzazione.
+
+Prima di prompt, tool message, history e risposta vengono oscurati email,
+credenziali note, token riconoscibili, riferimenti etichettati a customer ID e valori
+d'identità della sessione. `privacy_scope` usa ContextVar per isolare le richieste.
+Il formatter ordini mantiene l'allowlist di campi e il filtro customer/id prima
+di trasmettere dati. La redazione è difesa aggiuntiva, non classificazione DLP di
+qualsiasi stringa segreta offuscata: la knowledge base deve contenere solo dati
+pubblici. Metadati/fonti della risposta HTTP passano dalla stessa redazione.
+
+I client non possono scegliere gli ID di log: entrambi sono generati dal server
+per la richiesta e non coincidono con token o handle di conversazione. I log
+operativi mantengono soltanto metadata allowlisted; access log Uvicorn disabilitati
+per non conservare query string. Proxy e tracing esterni devono rispettare la
+stessa minimizzazione. I test del provider sintetico controllano anche il payload
+HTTP effettivamente ricevuto dal modello, senza conservarlo nei report.

@@ -85,7 +85,7 @@ def healthy() -> dict:
     reset()
     shipping, _, request_id = post("Come funziona la spedizione?")
     assert shipping["sources"] and shipping["tools_used"] == ["cerca_informazioni_negozio"]
-    assert request_id.startswith("issue5-")
+    assert len(request_id) == 32 and request_id != "issue5-request"
     missing, _, _ = post("Avete una garanzia contro i meteoriti?")
     assert missing["reply"] == UNCITED_REPLY and missing["sources"] == []
 

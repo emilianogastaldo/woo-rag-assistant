@@ -2,6 +2,7 @@
 
 Nessun test tocca la rete: né WooCommerce, né ChromaDB, né OpenAI.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -56,3 +57,12 @@ def make_order(order_id: int, customer_id: int, **overrides: Any) -> dict:
 @pytest.fixture
 def woo() -> FakeWooClient:
     return FakeWooClient()
+
+
+@pytest.fixture(autouse=True)
+def isolated_security_state():
+    from app.conversations import MemoryConversationStore, MemoryRateLimiter
+    from app.main import app
+
+    app.state.conversations = MemoryConversationStore()
+    app.state.rate_limiter = MemoryRateLimiter()
