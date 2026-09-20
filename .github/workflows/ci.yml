@@ -30,6 +30,14 @@ jobs:
       - name: Lint (ruff)
         run: ruff check . ../evals --config pyproject.toml
 
+      - name: Lint runner migrazione
+        run: >-
+          ruff check ../scripts --config pyproject.toml
+          --config 'lint.isort.known-first-party=["app","evals"]'
+
+      - name: Test runner migrazione (rete bloccata)
+        run: PYTHONPATH=..:. pytest -q ../scripts/test_demo_candidate.py
+
       - name: Test (pytest)
         run: pytest -q
 
