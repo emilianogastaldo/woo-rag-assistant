@@ -33,10 +33,15 @@ jobs:
       - name: Eval deterministici (rete bloccata dal runner)
         run: PYTHONPATH=..:. python -m evals.run_agent_eval --output ../evals/results/ci.json
 
+      - name: Ablazioni retrieval offline (BM25 e RRF reali, adapter locali)
+        run: >-
+          PYTHONPATH=..:. python -m evals.run_retrieval_eval --repeats 3
+          --output ../evals/results/ci-retrieval.json
+
       - name: Report eval senza payload o segreti
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: offline-eval
-          path: evals/results/ci.json
+          path: evals/results/ci*.json
           if-no-files-found: ignore

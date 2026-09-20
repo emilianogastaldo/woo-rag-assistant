@@ -17,6 +17,13 @@ class LiveStore:
         self.vectors = vectors
         self.embedding_calls = 0
 
+    def get(self, **kwargs):
+        return {
+            "ids": [doc.metadata["chunk_id"] for doc in self.docs],
+            "documents": [doc.page_content for doc in self.docs],
+            "metadatas": [doc.metadata for doc in self.docs],
+        }
+
     async def asimilarity_search_with_score(self, query, k=4):
         self.embedding_calls += 1
         query_vector = await self.embeddings.aembed_query(query)

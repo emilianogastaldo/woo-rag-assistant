@@ -1,0 +1,37 @@
+# Standalone project. Run only through run_local_integration.py (unique inventory).
+services:
+  chroma:
+    image: chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6
+    pull_policy: never
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+      IS_PERSISTENT: "TRUE"
+    volumes:
+      - data:/data
+  runner:
+    image: woo-chatbot-chatbot-api:latest
+    pull_policy: never
+    user: "${LOCAL_UID:?}:${LOCAL_GID:?}"
+    environment:
+      PYTHONPATH: /app:/
+      OPENAI_API_KEY: ""
+      LANGCHAIN_TRACING_V2: "false"
+      LANGCHAIN_TRACING: "false"
+      ANONYMIZED_TELEMETRY: "false"
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      CHROMA_COLLECTION: "${TEST_COLLECTION:?}"
+      WC_BASE_URL: http://unused.invalid
+      WC_CONSUMER_KEY: synthetic
+      WC_CONSUMER_SECRET: synthetic
+      SESSION_SECRET: synthetic-integration-only
+    volumes:
+      - ../chatbot:/app:ro
+      - .:/evals:ro
+      - ${ISSUE4_RESULTS:?}:/results
+    command: python -m evals.chroma_integration
+networks:
+  default:
+    internal: true
+volumes:
+  data:

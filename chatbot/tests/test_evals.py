@@ -67,6 +67,8 @@ async def test_repetitions_have_identical_quality_and_counts():
         for row in (first, second):
             row.pop("repeat")
             row["metrics"].pop("latency_ms")
+            for attempt in row["diagnostics"]["attempts"]:
+                attempt.pop("timings_ms")
         assert first == second
 
 

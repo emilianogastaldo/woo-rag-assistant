@@ -12,7 +12,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import settings
+from app.rag.chain import KnowledgeBase
 from app.rag.chunks import verified_chunk_id
+from app.rag.lexical import code_tokens, searchable_text, tokenize
+from app.rag.retrieval import query_digest
+from evals.diagnostics import classify_failure, describe_attempt
 from evals.fixtures import RAG, TOOLS
 
 SCHEMA_VERSION = 2
@@ -98,16 +102,75 @@ class RecordingStore:
     def __init__(self, store):
         self.store = store
         self.results = []
+        self.searches = []
+        self.config = settings.retrieval
+        self.corpus = []
+        self.query_terms = {}
+
+    def get(self, **kwargs):
+        return self.store.get(**kwargs)
 
     async def asimilarity_search_with_score(self, query, k=4):
+        self.query_terms[query_digest(query)] = (set(tokenize(query)), code_tokens(query))
         hits = await self.store.asimilarity_search_with_score(query, k=k)
         self.results.append(hits)
         return hits
 
 
+class RecordingKnowledgeBase(KnowledgeBase):
+    async def search(self, query, k=None):
+        result = await super().search(query, k=k)
+        self.store.searches.append(result)
+        return result
+
+
+def admitted_documents(retrieval):
+    """Independent citation audit: RRF is never interpreted as cosine distance."""
+    if not retrieval.searches:  # Legacy tests/adapters, semantic-only schema-2 audit.
+        return [doc for hits in retrieval.results for doc, distance in hits
+                if distance <= settings.retrieval_max_distance]
+    documents = []
+    config = retrieval.config
+    for result in retrieval.searches:
+        if not result.attempts:
+            continue
+        final = result.attempts[-1]
+        for item in final.candidates:
+            if item.chunk_id not in final.selected_ids or not item.accepted:
+                continue
+            # Evidence label is audited against the original typed score. The lexical
+            # gate was evaluated with the query, whose plaintext is deliberately absent
+            # from reports; the recorder keeps only its token set in memory.
+            if item.evidence == "cosine":
+                valid = (item.cosine_distance is not None
+                         and item.cosine_distance <= config.max_distance)
+            elif item.evidence == "lexical":
+                query_terms, codes = retrieval.query_terms[final.query_digest]
+                terms = set(tokenize(searchable_text(item.document)))
+                valid = (config.strategy == "hybrid" and item.bm25_score is not None
+                         and item.bm25_score >= config.lexical_min_score and bool(query_terms)
+                         and codes <= terms
+                         and len(query_terms & terms) / len(query_terms)
+                         >= config.lexical_min_coverage)
+            else:
+                valid = False
+            if final.reformulated:
+                query_terms, codes = retrieval.query_terms[final.query_digest]
+                terms = set(tokenize(searchable_text(item.document)))
+                valid = valid and bool(query_terms) and codes <= terms and (
+                    len(query_terms & terms) / len(query_terms) >= config.lexical_min_coverage
+                )
+            if valid:
+                documents.append(item.document)
+    return documents
+
+
 def score(case, result, retrieval, trace, woo_calls, latency_ms, error=False):
     # Valuta il primo retrieval della domanda; non premia tentativi ripetuti.
     hits = retrieval.results[0] if retrieval.results else []
+    attempts = [a for search in retrieval.searches for a in search.attempts]
+    if attempts and retrieval.config.strategy == "hybrid":
+        hits = [(c.document, c.rrf_score) for c in attempts[0].candidates[:retrieval.config.k]]
     rank = next(
         (
             i
@@ -116,20 +179,18 @@ def score(case, result, retrieval, trace, woo_calls, latency_ms, error=False):
         ),
         None,
     )
+    admitted = admitted_documents(retrieval)
     identities = {
         (doc.metadata.get("title"), doc.metadata.get("source")): source_key(doc.metadata)
-        for results in retrieval.results
-        for doc, _ in results
+        for doc in [*[doc for hits in retrieval.results for doc, _ in hits], *admitted]
     }
     citations = {(s.get("title"), s.get("url")) for s in result.sources}
     # Audit indipendente dal validatore dell'agente: ID nel testo, sotto soglia,
     # metadati coerenti e appartenenza alla stessa esecuzione.
     retrieved_ids = {
         identifier: (doc.metadata["title"], doc.metadata["source"], doc.metadata["type"])
-        for results in retrieval.results
-        for doc, distance in results
-        if distance <= settings.retrieval_max_distance
-        and (identifier := verified_chunk_id(doc)) is not None
+        for doc in admitted
+        if (identifier := verified_chunk_id(doc)) is not None
     }
     text_ids = set(re.findall(r"\[(chunk-[^\[\]\s]*)\]", result.reply))
     attributed_ids = {identifier for s in result.sources for identifier in s.get("chunk_ids", [])}
@@ -178,6 +239,8 @@ def score(case, result, retrieval, trace, woo_calls, latency_ms, error=False):
         "output_tokens": trace.output_tokens,
         "latency_ms": round(latency_ms, 3),
     }
+    expected_ids = [doc.metadata["chunk_id"] for doc in retrieval.corpus
+                    if source_key(doc.metadata) == case.expected_source]
     return {
         "id": case.id,
         "route": route(result.tools_used),
@@ -187,6 +250,17 @@ def score(case, result, retrieval, trace, woo_calls, latency_ms, error=False):
         "passed": not error
         and all(values[k] == 1 for k in QUALITY if k != "mrr" and values[k] is not None),
         "metrics": values,
+        "diagnostics": {
+            "failure": classify_failure(
+                expects_source=bool(case.expected_source), expected_ids=expected_ids,
+                corpus_ids=[doc.metadata["chunk_id"] for doc in retrieval.corpus],
+                attempts=attempts, answer_correct=bool(answer_correct),
+                citation_correct=values["citation_validity"] == 1
+                and (values["citation_recall"] in (None, 1)),
+            ),
+            "expected_chunk_ids": expected_ids,
+            "attempts": [describe_attempt(a, expected_ids) for a in attempts],
+        },
     }
 
 

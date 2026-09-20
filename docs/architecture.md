@@ -257,3 +257,91 @@ del documento e non è una difesa generale contro prompt injection.
 il deploy; fino ad allora i vecchi record non sono citabili. È un'operazione live
 separata, con embedding e reset della collection, da autorizzare esplicitamente.
 Nessuna ingestion live è necessaria ai test: lo store viene simulato.
+
+### DEC-011 — Hybrid sperimentale, gate indipendenti dai punteggi RRF
+
+`KnowledgeBase` accetta una `RetrievalConfig` immutabile, validata anche al caricamento
+delle variabili d'ambiente. Strategie `semantic` e `hybrid`; `k`, candidati per
+canale, costante/pesi RRF, parametri BM25, soglia coseno, score/copertura lessicale
+e limite retry sono configurabili. Candidati >= k, pesi positivi, valori finiti,
+retry 0/1. Il percorso semantic mantiene k e soglia precedenti.
+
+Nel percorso hybrid, un `get(documents, metadatas)` legge il contenuto corrente
+della collection. I record devono avere ID Chroma uguale al `chunk_id` verificato
+dalla #2. `BM25Index` è costruito in memoria su questi soli record. SKU e titolo
+sono campi lessicali aggiuntivi, senza alterare testo o identità dei chunk.
+Non ci sono sidecar da sincronizzare, cache a TTL o snapshot persistenti: ogni
+ricerca rilegge Chroma, anche dopo sostituzioni con lo stesso numero di record.
+Il costo è O(corpus) per ricerca: adatto al corpus della demo; per corpus grandi
+servirà un indice versionato e pubblicato atomicamente, misurandone il costo.
+L'ingestion corrente non è transazionale: una ricerca durante reset/upsert può
+vedere un corpus parziale. Il deploy deve ancora coordinare le reindicizzazioni.
+
+Tokenizzazione Unicode NFKC/casefold con stopword italiane; codici composti e
+decimali rimangono interi (`ZX-104` diverso da `ZX-140`, `4,90` diverso da `49`).
+Niente stemming o spezzatura dei codici. BM25 usa IDF positivo
+`log(1 + (N-df+0.5)/(df+0.5))`, saturazione k1 e normalizzazione lunghezza b.
+I pareggi lessicali/fusi sono risolti per ID, le duplicazioni per ID sono eliminate
+prima di assegnare ranghi. RRF somma `peso / (costante + rango)` con rango da 1;
+il valore assoluto dei punteggi dei due canali non è confrontato.
+Riferimenti: [BM25](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf),
+[RRF](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf).
+
+Dopo la fusione il gate ammette distanza coseno <= soglia **oppure** score BM25 >=
+soglia e copertura dei termini significativi >= minimo (default sperimentale 1.0).
+I codici espliciti nella query devono essere presenti esattamente nel chunk o nei
+suoi campi lessicali: un prodotto semanticamente simile non giustifica un codice
+sconosciuto. RRF non entra mai in questo gate. Si prendono i primi k candidati
+ammissibili; `cosine_distance`, `bm25_score`, `rrf_score`, ranghi e motivo del gate
+restano distinti nella traccia. I chunk semantici non presenti nello snapshot
+verificato non entrano nella fusione.
+
+Il retry, opt-in e al massimo uno per chiamata RAG, parte se nessun passaggio supera
+il gate. La riformulazione è locale: stopword e poche equivalenze (`restituire` →
+`reso`), mantenendo codici, numeri e negazioni. Una query invariata/vuota non viene
+ripetuta. Un `passage_assessor` locale iniettabile può segnalare che passaggi non
+vuoti non rispondono: il segnale svuota il contesto prima dell'eventuale retry.
+Non è installato un giudice semantico di default; il gate non rileva ogni domanda
+senza risposta. Il secondo tentativo richiede inoltre copertura lessicale dei
+termini riformulati >= `lexical_min_coverage`, anche se supera il gate coseno:
+una domanda compressa non può riaprire l'astensione solo perché cambia distanza.
+Questa salvaguardia nasce dalla regressione `absent-policy` misurata nello smoke
+con embedding reali e corretta con replay offline dei medesimi punteggi.
+Non vengono ritentati errori di rete/provider e non ci sono
+chiamate di generazione per riscrivere. Al massimo due query embedding per ricerca
+con retry abilitato, oltre ai tentativi SDK del provider di produzione.
+Il limite è per ricerca; ulteriori chiamate tool restano sotto il loop dell'agente.
+
+Solo il contesto finale ammesso viene registrato per le citazioni; passaggi
+scartati dall'assessor non diventano citabili. Il registro per esecuzione, le
+regole di astensione senza citazioni e l'isolamento dei tool della #2 restano attivi.
+
+### DEC-012 — Tre prove separate e default conservativo
+
+La suite schema v2/FakeStore resta una regressione dell'orchestrazione. Un nuovo
+benchmark applica davvero semantic/BM25/RRF allo stesso corpus di 12 chunk e a 16
+domande sintetiche, con vettori locali calcolati dal testo. Ogni leva è confrontata
+con semantic e con la configurazione parent; ranghi iniziali e risultati dopo retry
+sono separati. I vettori locali ignorano intenzionalmente i codici: servono a
+esercitare il recupero lessicale, non a stimare le prestazioni di OpenAI.
+
+L'harness di integrazione usa Chroma reale in un progetto Compose univoco, volume
+nuovo, nessuna porta pubblicata, rete `internal` e socket Python limitati a
+`chroma:8000`. Non carica `.env`, controlla configurazione effettiva, collisioni,
+nomi, mount e immagini; registra inventario e pulisce/verifica soltanto le risorse
+della propria esecuzione. Il blocco di rete della suite pytest ordinaria rimane.
+
+Uno smoke separato può richiedere **un solo batch** di embedding reali per sei
+casi, dopo consenso, riusando i vettori identici fra strategie. Corpus/query sono
+sintetici; generazione e Woo restano locali; nessun accesso a collection/store.
+Timeout, input e spesa stimata sono limitati prima della chiamata, retry SDK zero;
+un input mancante nella cache non può generare un'altra chiamata. Tariffa e token
+effettivi sono riportati separando stima economica e costo fatturato non misurato.
+
+La classificazione degli errori usa conoscenza del golden/corpus, non il modello:
+fonte assente → corpus miss; fonte non candidata o rifiutata dal gate/assessor →
+retrieval miss; candidata ammissibile fuori dal contesto top-k → ranking miss;
+fonte presente nel contesto ma risposta/citazione errata → generation/citation miss.
+Questa diagnostica è server-side/eval, non un nuovo campo pubblico HTTP.
+Default semantic senza retry: manca ancora un benchmark semantico autorizzato e
+ripetuto che giustifichi il cambio. Nessun MMR/reranker viene aggiunto per intuizione.

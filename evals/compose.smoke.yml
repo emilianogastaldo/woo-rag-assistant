@@ -1,0 +1,18 @@
+# Opt-in paid embeddings only, after consent. No connection to the demo network.
+services:
+  smoke:
+    image: woo-chatbot-chatbot-api:latest
+    pull_policy: never
+    environment:
+      PYTHONPATH: /app:/
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?}
+      LANGCHAIN_TRACING_V2: "false"
+      LANGCHAIN_TRACING: "false"
+      ANONYMIZED_TELEMETRY: "false"
+      WC_BASE_URL: http://unused.invalid
+      CHROMA_HOST: unused.invalid
+    volumes:
+      - ../chatbot:/app:ro
+      - .:/evals:ro
+      - ./results:/results
+    command: python -m evals.run_embedding_smoke --estimate
