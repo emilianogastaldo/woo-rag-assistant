@@ -1,281 +1,322 @@
-# Migrazione controllata della demo — inventario e piano
+# Migrazione controllata della demo — risultati e prossimi consensi
 
-**Stato: piano pronto, migrazione non eseguita.**
+**Preparazione locale PASS; migrazione non eseguita.**
 
-Inventario del 20 settembre 2026, circa 21:40 UTC. Nessuna issue GitHub nuova:
-il follow-up non assegna un numero. Questo report documenta la fase preliminare,
-non certifica una migrazione completata.
+Inventario iniziale: 20 settembre 2026. Preparazione autorizzata: 21 settembre
+2026, ora italiana (snapshot il 20 settembre alle 22:20:50 UTC).
+Nessuna issue nuova: il follow-up non assegna un numero. PR separata #15,
+branch `docs/demo-migration-plan`; nessuna merge automatica.
 
-## Revisione e autorizzazioni
+## Autorizzazioni e revisioni
 
-- Worktree condiviso pulito, branch `feat/issue-7-ingestion-deployment`, HEAD
-  `f6aaa755ae296e550c80c0ad7eb1b5572d9e1a25`; branch e sorgenti lasciati invariati.
-- Dopo `git fetch origin`, target integrato `origin/main`:
-  **`e1389ca0574bf33279d1fc1dcf11a0d415eb45b7`**, merge della PR #14.
-  Il tree coincide con quello del worktree condiviso (`git diff HEAD origin/main` vuoto).
-- Report preparato nel worktree separato `/tmp/woo-demo-migration-report`, branch
-  `docs/demo-migration-plan`; nessuna merge automatica.
-- Letti `CLAUDE.md`, README, guida ingestion/deployment, report #7, Dockerfile,
-  Compose, CLI ingestion, registry, readiness, chunking e configurazione.
-  Nessun `AGENTS.md` trovato nel percorso applicabile.
-- Autorizzati dal task: letture/inventario, piano e report/PR separati. Gli accessi
-  Docker in sola lettura e la creazione del worktree hanno superato i permessi
-  dell'ambiente. Questi permessi **non** autorizzano manutenzione o provider.
-- **NON ESEGUITO / consenso operativo ancora da ottenere:** backup, stop/start,
-  build/test in container, creazione di volumi, deploy, ingestion e promozione.
-- **NON ESEGUITO / consenso provider assente:** invio corpus e chiamate OpenAI,
-  LlamaCloud o chat. Nessuna modifica a `.env`; nessun seed o cleanup.
+L'utente ha risposto **«si, autorizzo»** alla proposta di test isolati, backup
+coerente, prova di ripristino e conteggio locale del corpus, con una finestra di
+manutenzione fino a 15 minuti. Questa autorizzazione è stata utilizzata solo per
+la preparazione locale. **Provider, candidate, promozione e deploy finale non sono
+ancora autorizzati né eseguiti.**
 
-## Inventario effettivo
+- Worktree condiviso: branch `feat/issue-7-ingestion-deployment`, HEAD
+  `f6aaa755ae296e550c80c0ad7eb1b5572d9e1a25`, pulito prima e dopo.
+- Target integrato dopo #7: **`e1389ca0574bf33279d1fc1dcf11a0d415eb45b7`**,
+  merge PR #14, acquisito con `git fetch origin`; tree applicativo uguale al
+  worktree condiviso. Il suo branch non è stato cambiato.
+- Preparazione nel worktree `/tmp/woo-demo-migration-report`. I test principali
+  e l'harness hanno usato il commit documentale `9095042`, con codice, Dockerfile,
+  lock e Compose identici al target. Il digest dei file applicativi è
+  `a461b4cdce9081b370cd1264ac9f49f04efcef2df6fb48fe4f34f52c505fdcf4`.
+- Nuovi file operativi: `scripts/demo_candidate.py` e relativo test. Non modificano
+  app, CLI ordinario, modelli, chunking, retrieval o funzionalità della demo.
+  Lint e test del runner sono aggiunti anche alla CI; i test bloccano DNS/socket.
+- Letti istruzioni applicabili, `CLAUDE.md`, README, guida ingestion/deployment,
+  report #7, Compose e codice del CLI/registry/readiness. Nessun `AGENTS.md`
+  trovato nel percorso applicabile.
 
-Contesto Docker `default`, endpoint `unix:///var/run/docker.sock`, Engine 29.8.0.
-Progetto Compose `woo-chatbot`; file nel worktree condiviso. Esiste anche il progetto
-`databases`, fuori perimetro. Quattro container demo running dall'avvio del
-19 settembre; nessun container ingest rilevato. Nel namespace processi accessibile
-si vede una sessione Codex; non è prova dell'assenza di operatori/sessioni sull'host.
-Prima della manutenzione serve esclusività operativa su demo e ingestion.
+Nessuna modifica a `.env`, nessun seed, nessun ordine/cliente letto per ingestion,
+nessuna chiamata AI. Docker e le chiavi disponibili non sono consenso al provider.
 
-| Servizio / container `woo-chatbot-…-1` | Riferimento in uso | Image ID (SHA-256) | Porte host |
-| --- | --- | --- | --- |
-| `chatbot-api` | `woo-chatbot-chatbot-api:latest` | `1c6ad01a731ecbfbaba94c1b4ad7993100adfdece57b7c33edde58c9ae2b71c6` | 8000 |
-| `wordpress` | `wordpress:php8.3-apache` | `cc795f5862b2f3891a805106917089558eef28a56755bd8ac8308d1ab57b28d7` | 8080 |
-| `db` | `mariadb:11` | `efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4` | nessuna; 3306 interna |
-| `chromadb` | `chromadb/chroma:latest` | `1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6` | 8001 → 8000 |
+## Inventario e compatibilità
 
-Le porte pubblicate sono su IPv4 `0.0.0.0` e IPv6 `::`.
-MariaDB ha healthcheck healthy; gli altri container attuali non hanno healthcheck.
+Contesto `default`, endpoint `unix:///var/run/docker.sock`, Engine 29.8.0,
+progetto Compose `woo-chatbot`. Il progetto `databases` è fuori perimetro.
+Nessun ingest demo concorrente rilevato; l'inventario dei processi accessibile
+mostra una sessione Codex, ma non certifica tutte le sessioni dell'host.
+Ricontrollare l'esclusività operativa prima della fase successiva.
 
-Mount osservati:
+| Container `woo-chatbot-…-1` | Immagine preesistente (SHA-256) | Dati / porta |
+| --- | --- | --- |
+| `chatbot-api` | `1c6ad01a731ecbfbaba94c1b4ad7993100adfdece57b7c33edde58c9ae2b71c6` | Bind `chatbot:/app`, `evals:/evals`, `widget:/widget:ro`; 8000 |
+| `wordpress` | `cc795f5862b2f3891a805106917089558eef28a56755bd8ac8308d1ab57b28d7` | `woo-chatbot_wp_data:/var/www/html`; 8080 |
+| `db` | `efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4` | `woo-chatbot_db_data:/var/lib/mysql`; 3306 interna |
+| `chromadb` | `1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6` | `woo-chatbot_chroma_data:/data`; 8001 → 8000 |
 
-- API: `chatbot` → `/app` e `evals` → `/evals` in lettura/scrittura;
-  `widget` → `/widget` in sola lettura, tutti dal worktree condiviso.
-  Comando Uvicorn con `--reload`, senza numero esplicito di worker.
-- `woo-chatbot_db_data` → `/var/lib/mysql`;
-  `woo-chatbot_wp_data` → `/var/www/html`;
-  `woo-chatbot_chroma_data` → `/data`. Volumi Docker locali persistenti.
-- **`woo-chatbot_knowledge_state` non esiste**, e l'API non monta `/state/knowledge`.
-  Anche la directory del namespace nel filesystem del container è assente.
+Le porte host sono pubblicate su IPv4 `0.0.0.0` e IPv6 `::`. MariaDB ha healthcheck
+healthy; gli altri container attuali non hanno healthcheck. Gli ID dei quattro
+container e delle immagini sono rimasti invariati dopo la manutenzione.
 
-L'API combina una vecchia immagine con i sorgenti attuali montati. La revisione del
-processo caricato non è attestata dall'Image ID: `/openapi.json` espone già `/ready`,
-ma manca la nuova configurazione di persistenza. Non basta riutilizzare il tag
-vecchio per descrivere o recuperare questo stato: vanno preservati anche i sorgenti.
+L'API preesistente usa Uvicorn `--reload` e una vecchia immagine con sorgenti attuali
+montati: l'immagine da sola non identifica il codice servito. I sorgenti sono
+inclusi nel backup di recupero. Non sono stati modificati mentre montati.
 
-### Compatibilità immagini
+I digest target di **Chroma, MariaDB e WordPress coincidono con quelli in uso**:
+nessun downgrade o cambio di binari sui loro volumi. Chroma restituisce `1.0.0`;
+il client target `chromadb==1.5.9` è stato provato sul ripristino isolato.
+WordPress e DB non sono stati fermati, aggiornati, ricreati o sottoposti a restore.
+Un loro coinvolgimento futuro richiede un piano esteso ai rispettivi backup.
 
-I digest target Compose per **WordPress, MariaDB e Chroma coincidono esattamente**
-con gli Image ID e RepoDigest in esecuzione. Non è previsto un cambio di binari
-su quei volumi. Chroma risponde `1.0.0` all'endpoint versione; il client del lock
-Python è `chromadb==1.5.9`. Il comportamento del client target sulla copia va
-comunque verificato: l'uguaglianza dell'immagine server non dimostra la migrazione.
+Build eseguita da sorgenti target:
 
-I tag locali `woo-rag-api:issue7` e `woo-rag-ingest:issue7` puntano entrambi a
-`sha256:20790280c4d27bcb73e50f4c42694ecca77e6e090bc0344275c9c57d5d8e20d5`.
-La presenza dei tag non attesta da sola la loro provenienza. Il piano prevede
-una build dalla revisione esatta target, tag dedicati e registrazione degli ID,
-senza sovrascrivere immagini di recupero. Se cambiano i digest delle dipendenze,
-stop: revisione del piano e prova su copia prima di collegarle ai volumi.
+```bash
+docker build -t woo-rag-api:demo-e1389ca -t woo-rag-ingest:demo-e1389ca chatbot
+```
 
-## Knowledge base e configurazione
+Entrambi i tag puntano a
+`sha256:e6c9b42ac33c1f8babe5c39c4a469563a6d4818039d9069e25066175b789d6c2`.
+Le immagini preesistenti restano conservate; nessun riutilizzo del tag demo vecchio.
 
-| Campo | Osservato / target |
-| --- | --- |
-| Endpoint | `chromadb:8000`, tenant `default_tenant`, database `default_database` |
-| Namespace / legacy | `woo_knowledge` |
-| Collection rilevate | una: `woo_knowledge`, 12 record, dimensione 1536 |
-| Metadati collection legacy | nessun campo modello, owner, manifest o `hnsw:space` disponibile |
-| Collection versionate | nessuna rilevata nel database (lista con limite 1000, un risultato) |
-| Registro persistente / manifest | assenti |
-| Active / previous registrati | assenti; reader previsto in fallback legacy |
-| Modello embedding configurato | `text-embedding-3-small`, endpoint OpenAI predefinito |
-| Target chunking / dimensioni | 800 caratteri, overlap 120, 1536 dimensioni |
-| Target retrieval | `semantic`, retry retrieval `0` |
-| Generazione configurata | `gpt-4.1-mini`; nessuna chiamata eseguita |
-| Ambiente / demo | `development`, `DEMO_ENABLED=false` nel Compose risolto |
+## Knowledge base e stato attuale
 
-Il digest del namespace è
-`ac71fcb760ee03c081d5e8cb5e654d7659e45bab83959ca8b296e893ace1d4ac`.
-Il registro target è sotto `/state/knowledge/<digest>`; API e ingest, verificati
-anche con il profilo `ingest`, dichiarano lo stesso `knowledge_state`, namespace,
-modello e dimensioni. Il chunking 800/120 è esplicito per API; ingest non riceve
-queste due variabili dal Compose e usa i medesimi default nel codice. Questo volume condiviso è soltanto **previsto**,
-non già applicato ai container. Non è stato eseguito neppure `ingest status`:
-il suo lock inizializza directory e file.
+- Endpoint `chromadb:8000`, tenant `default_tenant`, database `default_database`.
+- Namespace e unica collection: **`woo_knowledge`**, 12 record, 1536 dimensioni.
+  La lista restituisce una collection; nessuna collection versionata rilevata.
+- Nessun manifest/owner/modello o `hnsw:space` dichiarato nei metadati legacy.
+  Conteggio e dimensione non attestano qualità, citazioni o provenienza del modello.
+- **`woo-chatbot_knowledge_state` resta assente**, così come `/state/knowledge`
+  nel container API. Nessun puntatore active/previous registrato: fallback legacy.
+- Namespace digest:
+  `ac71fcb760ee03c081d5e8cb5e654d7659e45bab83959ca8b296e893ace1d4ac`.
+- Target invariato: `text-embedding-3-small`, 1536 dimensioni, chunking 800/120,
+  retrieval `semantic`, retry retrieval `0`. API e ingest nel Compose risolto
+  condividono questi parametri e il futuro volume POSIX `knowledge_state`.
+- Ambiente `development`, `DEMO_ENABLED=false`, confermato da `/session/config`.
+  Non è stato abilitato il login demo. La generazione configurata resta
+  `gpt-4.1-mini`, mai invocata in questa preparazione.
 
-I 12 record legacy non provano provenienza del modello, correttezza degli ID o
-citazioni, metrica dell'indice né dimensione del nuovo corpus. Non sono stati letti
-documenti, embedding o manifest completi durante l'inventario.
-Il login demo risulta disabilitato anche da `/session/config`: il piano mantiene
-questa scelta. L'eventuale attivazione richiede una scelta esplicita, solo development.
+La lettura finale di tutti i record legacy, eseguita localmente senza stamparli,
+ha confermato che testo, metadati, ID e vettori coincidono con la copia ripristinata.
+Il digest canonico aggregato è
+`36672d517d3eb8faf5dde9c92c796e8e6b6d268c2e31e6789dcc9171be35baaf`.
 
-## Verifiche prima della migrazione
+## Backup e ripristino verificati
+
+Destinazione privata fuori Git:
+`/home/emilianogastaldo/.local/share/woo-rag-assistant/backups/demo-migration-20260920/`.
+Directory 0700, archivi/configurazione/documenti privati 0600. I sorgenti estratti
+per la prova mantengono i propri permessi dentro questa directory protetta.
+
+Preservati: configurazione effettiva e riferimenti dei container, `.env`, archivi
+Git prima/target, immagini API precedente/target e Chroma, dati Chroma e attestazione
+dell'assenza del registro. Nessuno di questi artefatti privati è nella PR.
+L'archivio immagini occupa 612.648.448 byte; spazio libero verificato prima della copia.
+
+Procedura realmente eseguita:
+
+1. Verificati immagini, Git, writer/volumi e assenza di registro; salvate immagini e
+   configurazione mentre la demo era ancora attiva.
+2. Fermati **prima API, poi Chroma**, con uscita pulita. Copiato il volume Chroma
+   fermo, preservando proprietari e permessi. Nessuna copia del DB attivo.
+3. Riavviati gli stessi container Chroma/API. Heartbeat, `/health` e widget tornati
+   HTTP 200. Durata complessiva stop/copia/riavvio/sonde: **7,86 secondi**.
+   Conversazioni e contatori in memoria sono stati persi al riavvio, come previsto.
+4. Ripristinati gli archivi in risorse nuove sulla rete interna
+   `woo-demo-restore-a6da1247e6-network`, senza porte pubblicate o credenziali AI.
+   Docker ha ricaricato e riconosciuto gli Image ID dall'archivio immagini.
+5. Verificati hash, UID/GID e permessi di ogni file ripristinato **prima** dell'avvio.
+   Il client target legge 12 record da 1536 dimensioni e la query con un vettore
+   già memorizzato restituisce un ID esistente con distanza circa zero.
+6. Avviata sulla copia la vecchia API con i sorgenti archiviati: `/health`,
+   `/widget/`, `/widget/chat.js` e `/ready` HTTP 200. Woo readiness è **simulata**;
+   credenziali provider/commerce rimosse per questa prova. Non sono provati recupero
+   live di ordini, autenticazione Woo o comportamento del modello.
+7. Confrontati record live/ripristinati, hash `.env`, stato Git e immagini: invariati.
+   WordPress/DB conservano anche il loro timestamp di avvio precedente.
+
+Archivio `chroma.tar`: **993.280 byte**, cinque file regolari, SHA-256
+`0eecac973b08416ed4a3f69c3789d50c7836946db6aa5c6f5d8208f63967082c`.
+La coppia di recupero è questo Chroma più **registro assente**, verificato prima
+della copia. La sonda `/ready` ha creato un lock soltanto nell'API isolata di restore.
+
+Le risorse di restore sono conservate: volume
+`woo-demo-restore-a6da1247e6-chroma` e tre container omonimi con suffissi
+`chroma`, `woo`, `api`, tutti fermati. Nessun cleanup della legacy o dei backup.
+I report privati `preparation.json`, `snapshot.json`, `restart.json`,
+`restore-results.json`, `restore-inventory.json` e `final-check.json` documentano
+la prova. Non sono stati pubblicati payload né manifest.
+
+## Test e controlli
 
 | Controllo | Esito | Evidenza / limite |
 | --- | --- | --- |
-| Stato Git / target integrato | PASS | Worktree pulito; target remoto acquisito, tree coincidente |
-| Confronto server e pin | PASS | Image ID / RepoDigest identici per DB, WP e Chroma |
-| Inventario Chroma e registro | PASS | 12 record legacy, 1536 dimensioni; nessun registro/versione |
-| `/health` | PASS | HTTP 200: liveness soltanto |
-| `/openapi.json` | PASS | HTTP 200, route `/ready` presente |
-| `/session/config` | PASS | HTTP 200, `demo_enabled=false` |
-| `/widget/`, `/widget/chat.js` | PASS | Entrambi HTTP 200; verifica statica, nessun browser |
-| `/ready` | NON ESEGUITO | Il codice entra in `Registry.snapshot()` e creerebbe `readers.lock` nella directory assente |
-| Backup e ripristino | NON ESEGUITO | Richiedono autorizzazione e manutenzione concordata |
-| Test/eval sulla revisione target in questa sessione | NON ESEGUITO | Rinviati alla preparazione autorizzata |
-| Candidate / promozione / controlli post-deploy | NON ESEGUITO | Consensi mancanti |
-| Chat provider / browser | NON ESEGUITO | Fuori dalla verifica preliminare |
+| Build target / wheel / lock | PASS | Build da sorgenti target con pin invariati; Image ID registrato |
+| Ruff applicazione ed eval | PASS | Rete disabilitata; nessuna credenziale |
+| Suite applicativa offline | PASS | **226 test**, un warning Starlette/AnyIO preesistente |
+| Eval agente | PASS | **90/90**, confronto baseline #7 accettato senza regressioni funzionali |
+| Servizi reali sintetici isolati | PASS | Run `woo-issue7-82f51a1904d6`, startup, fault injection, versioning, rollback, healthcheck |
+| Query HTTP sintetiche | PASS | 107 query; nessuna chiamata provider esterna |
+| Cleanup harness sintetico | PASS | Solo risorse del suo progetto dopo audit ownership |
+| Backup coerente e recupero isolato | PASS | Hash/file/immagini, Chroma e startup API verificati come sopra |
+| Woo key read-only | PASS | Solo SELECT del campo permissions per la chiave usata: `read` |
+| Corpus / chunking / token | PASS | Conteggio locale, tokenizer offline, zero embedding |
+| Runner candidate: lint e protezioni | PASS | 12 test offline su dati sintetici e `httpx.MockTransport` |
+| Demo `/health` e widget statico prima/dopo | PASS | HTTP 200; nessuna prova browser |
+| Demo `/ready` live | NON ESEGUITO | Creerebbe il registro assente; testata solo sull'API di restore e nell'harness sintetico |
+| Candidate / promozione / deploy | NON ESEGUITO | Consensi separati ancora mancanti |
+| Chat provider / browser | NON ESEGUITO | Nessuna affermazione di qualità live |
 
-La baseline storica #7 è Ruff PASS, 226 test e 90/90 eval agente, più integrazione
-isolata. Non viene riclassificata come un test attuale o live della demo.
-La persistenza richiesta dal target manca: è una precondizione da realizzare,
-non un errore da aggirare disabilitando readiness.
+L'harness registra commit documentale `9095042` e digest applicativo uguale al target.
+I suoi provider sono sintetici: 113 richieste embedding e 214 completamenti locali,
+**zero chiamate AI esterne e costo API zero**. Le risorse demo non sono state usate
+come fixture della suite; la loro copia è stata usata esclusivamente per il restore.
 
-## Piano locale da autorizzare
-
-**Perimetro della prima autorizzazione:** preparazione, build e test sintetici
-isolati, backup coerente e prova di ripristino, inventario locale del corpus per
-stimare l'ingestion. Non comprende ingestion, promozione o deploy finale.
-
-1. Ricontrollare HEAD, container, volumi e operatori prima delle modifiche.
-   Preparare tutto nel worktree separato dalla revisione
-   `e1389ca0574bf33279d1fc1dcf11a0d415eb45b7`. Il worktree montato resta invariato.
-   Costruire API e ingest con tag dedicati `woo-rag-api:demo-e1389ca` e
-   `woo-rag-ingest:demo-e1389ca`; registrare gli Image ID risultanti.
-   Eseguire Ruff, pytest, eval agente 3 ripetizioni con provider finti e rete
-   disabilitata. L'integrazione sintetica usa solo risorse isolate e nuovi volumi;
-   i dati demo non diventano fixture di test.
-2. Preparare una directory privata fuori Git:
-   `/home/emilianogastaldo/.local/share/woo-rag-assistant/backups/demo-migration-20260920/`,
-   con permessi directory 0700/file 0600, senza sovrascrivere backup preesistenti.
-   Verificare spazio per archivio immagini, dati e copie di ripristino; riportare
-   dimensioni e hash nel registro privato, senza esportare contenuti nella PR.
-   Conservare `.env`, configurazione effettiva, riferimenti/archivi delle immagini,
-   sorgenti Git e inventario dei mount necessari a ricreare l'API precedente.
-3. Concordare una finestra di manutenzione della chat: **budget proposto 15 minuti**
-   per stop, copia coerente e restart, da confermare dopo aver misurato i volumi.
-   Interdire amministrazioni/ingestion e accessi concorrenti; fermare prima
-   `woo-chatbot-chatbot-api-1`, poi `woo-chatbot-chromadb-1`. Non copiare il DB attivo.
-   Copiare il volume Chroma fermo con ownership e permessi preservati; includere
-   registro e manifest se nel frattempo presenti, altrimenti registrare la loro
-   assenza verificata. Conservare questo abbinamento Chroma/stato come una singola
-   generazione di backup. Riavviare gli stessi container senza ricrearli dopo la
-   copia; non lasciare la demo ferma per tutta la prova di ripristino.
-4. Ripristinare in volumi **nuovi e isolati** usando lo stesso digest Chroma,
-   senza porte pubblicate né provider. Verificare hash dell'archivio, lettura dei
-   dati, collection/count/dimensione, metadati e ID, e una query con un vettore già
-   memorizzato. Verificare la coppia registro/Chroma e la configurazione di recupero
-   dell'app precedente; non confondere un semplice `tar -t` con il restore riuscito.
-   Documentare separatamente ciò che non è possibile provare sul recupero API.
-5. Leggere in locale il corpus effettivo previsto dal CLI, senza embedding, ordini
-   o clienti; contare prodotti, pagine, caratteri, chunk e token. Verificare i
-   permessi read-only Woo senza pubblicare chiavi. Preparare la stima e il consenso
-   separato indicati sotto. Arrestarsi se il corpus cambia rispetto all'inventario
-   approvato o se la dimensione supera i limiti concordati.
-
-WordPress, MariaDB e relativi volumi restano sui container attuali: non sono oggetto
-di stop, deploy o ripristino di questa proposta. Nessun `compose up` generale.
-Qualsiasi necessità di ricrearli estende il perimetro e richiede un nuovo piano
-che includa backup coerenti e verifica di ripristino **anche di WP e DB**.
-
-## Consenso separato per corpus e provider
-
-Da presentare **dopo il conteggio locale e prima di qualsiasi embedding**:
-
-- Corpus: nomi e descrizioni brevi/complete dei prodotti pubblicati, pagine
-  `spedizioni`, `resi-e-rimborsi`, `domande-frequenti`; pulizia HTML e chunking
-  previsti dal codice corrente. Nessun ordine, cliente o history. Manifest e
-  metadati restano locali; a OpenAI vanno i testi dei chunk.
-- Provider proposto: OpenAI, endpoint predefinito, `text-embedding-3-small`,
-  1536 dimensioni. LlamaCloud non viene chiamato dal CLI attuale.
-- Volume e costo: **ancora da calcolare**, non deducibili dai 12 record legacy.
-  Riportare numero di chunk, token stimati, richieste previste e prezzo ufficiale
-  verificato al momento; esplicitare margine e tetto di costo autorizzato.
-- Limiti da fissare con il consenso: singola build candidate-only, massimo corpus/
-  token/richieste, timeout totale e per richiesta, nessun retry automatico dell'SDK
-  embedding (`max_retries=0` nel codice), nessuna ripartenza dopo errore senza
-  diagnosi. Il CLI non impone un tetto monetario o un timeout globale: richiedere
-  limiti effettivamente applicabili prima di partire, non promettere un cap inesistente.
-- Nessuna generazione chat o judge. Lo smoke live resta separato.
-
-Disponibilità delle chiavi e approvazioni del sandbox non sono consenso al provider.
-
-## Candidate, promozione e deploy successivi
-
-Anche le seguenti operazioni restano **NON ESEGUITE**; verranno incluse nel consenso
-operativo per la fase successiva. Prima predisporre una configurazione Compose
-privata verificata, con progetto `woo-chatbot`, endpoint/volumi espliciti, immagini
-immutabili e sorgenti/widget fissati dal worktree separato. Per l'API usare il
-wheel senza hot reload e un solo worker. Non applicare automaticamente le modifiche
-ai servizi dipendenti del Compose corrente: i loro container sono ancora privi dei
-nuovi healthcheck. Usare `--no-deps` dopo verifica esplicita delle dipendenze.
-
-Creare `woo-chatbot_knowledge_state` soltanto dopo autorizzazione; API e ingest devono
-usarlo entrambi a `/state/knowledge`. Il namespace resta `woo_knowledge`; semantic,
-retry 0, modello e chunking restano invariati. Ogni comando sotto va eseguito
-singolarmente con **la configurazione operativa esplicita verificata**, non dal
-worktree condiviso alla cieca:
+Comandi offline principali, nel worktree separato e dentro container senza rete:
 
 ```bash
-# Prima sola lettura logica del registry, ma crea directory/lock: richiede consenso.
-docker compose run --rm --no-deps ingest python -m app.ingest status
-# --no-deps evita la ricreazione involontaria di WP/Chroma.
-docker compose run --rm --no-deps ingest python -m app.ingest build --candidate-only
-# SOLO dopo il successivo go/no-go sul risultato e nome completo:
-docker compose run --rm --no-deps ingest python -m app.ingest promote --target NOME_COMPLETO
+ruff check . /evals --no-cache --config /app/pyproject.toml
+pytest -q -p no:cacheprovider
+python -m evals.run_agent_eval --repeats 3 \
+  --baseline /evals/results/demo-migration-baseline.json \
+  --output /evals/results/demo-migration-offline.json \
+  --commit e1389ca0574bf33279d1fc1dcf11a0d415eb45b7
+# Harness host: rete interna e volumi nuovi con ownership verificata.
+python3 evals/run_issue7_integration.py
+# Runner operativo: soltanto trasporti e corpus sintetici.
+ruff check /scripts --no-cache --config /config/pyproject.toml \
+  --config 'lint.isort.known-first-party=["app","evals"]'
+pytest -q -p no:cacheprovider /scripts/test_demo_candidate.py
 ```
 
-Non eseguire il comando ingest senza argomenti: costruisce **e promuove**.
-Il nome completo deterministico inizia con `kb-ac71fcb760ee03c0-` e verrà ricavato
-dal manifest; non è noto prima di acquisire il corpus. Mostrare nome completo,
-conteggio, modello/dimensione, digest e risultato delle validazioni del CLI:
-uguaglianza di testo/metadati/ID, identità citabile `chunk-v1-*`, vettori finiti,
-conteggio e query strutturale a distanza circa zero. Nessun manifest nella PR.
-Verificare che build candidate-only non abbia modificato il puntatore attivo.
+I tentativi preliminari hanno richiesto correzioni ai soli helper/test operativi:
+filtro DB troppo ampio che includeva Chroma, ownership dei file generati come root,
+nome del file di configurazione Ruff, ordinamento import e tipo di eccezione SDK
+atteso dal test. Nessun difetto applicativo corretto o errore di migrazione ignorato;
+le evidenze PASS si riferiscono alle verifiche finali riuscite.
 
-Dopo tale evidenza chiedere un **go/no-go esplicito per promozione e deploy API**.
-Prevedere una seconda finestra di chat indisponibile, budget proposto 5 minuti:
-fermare/drainare la vecchia API, promuovere il nome autorizzato e ricreare solo API
-con immagine verificata e stato condiviso; controllare dipendenze senza bypass.
-Il riavvio perde conversazioni, sessioni applicabili e contatori in memoria;
-non promettere zero downtime e non aumentare i worker.
+## Corpus misurato e consenso provider richiesto
 
-Dopo deploy: verificare Image ID/revisione, mount condiviso, `status`, attiva/precedente,
-`/health`, `/ready` HTTP 200, widget HTML/JS e `/session/config`. Registrare l'esito
-senza chiamare `/chat` o simulare un browser. Non disabilitare auth, owner filtering,
-history server-side, Woo read-only o controlli readiness per ottenere PASS.
+Il fetch ha effettuato due richieste locali GET: prodotti Woo pubblicati e tre
+pagine WP `spedizioni`, `resi-e-rimborsi`, `domande-frequenti`. Il permesso della
+chiave è stato verificato con una SELECT senza caricare WordPress o leggere ordini
+/clienti. Pulizia HTML, metadati e chunking usano il codice corrente.
 
-## Recupero e condizioni di stop
+| Quantità | Misura |
+| --- | ---: |
+| Prodotti / pagine / documenti | 6 / 3 / 9 |
+| Caratteri dei documenti | 5.324 |
+| Chunk prodotto / pagina / totali | 6 / 6 / 12 |
+| Caratteri / byte UTF-8 dei chunk | 5.385 / 5.455 |
+| Token embedding stimati, `cl100k_base` | **1.605** |
+| Token massimi per chunk | 230 |
+| Richieste embedding eseguite | **0** |
 
-**Prima promozione da legacy:** `previous` sarà `null`; il comando ordinario
-`rollback --target woo_knowledge` non riattiva la legacy e non va utilizzato.
+Il dizionario pubblico del tokenizer è stato scaricato separatamente, verificato
+contro il checksum del pacchetto, poi usato con rete disabilitata. Non è stato
+inviato il corpus per il conteggio. Manifest e documenti sono conservati solo nella
+directory privata `corpus-inventory` del backup.
 
-Conservare sempre legacy, candidate, eventuale precedente e backup. In caso di
-fallimento dopo la prima promozione: fermare API e amministrazioni, preservare il
-nuovo stato per diagnosi, quindi ripristinare in volumi distinti la coppia
-Chroma/registro del backup verificato e ricreare l'app con immagine, configurazione
-e sorgenti pre-migrazione. Il backup iniziale attesta registro assente: recuperare
-quel preciso stato insieme alla legacy, senza cancellare a mano `active.json` o
-lock nel volume migrato. Ricollegare soltanto i volumi recuperati verificati.
-Controllare la legacy e l'app rispetto alla baseline precedente; non attribuire
-alla baseline garanzie di readiness o qualità che qui non sono state misurate.
+Provider proposto: **OpenAI**, `https://api.openai.com/v1/embeddings`, modello
+**`text-embedding-3-small`**, **1536 dimensioni**. Verranno inviati soltanto i testi
+dei 12 chunk (nomi/descrizioni prodotti e testo delle tre pagine), non ordini,
+clienti, history o manifest. Il CLI attuale non usa LlamaCloud.
 
-Per le promozioni future già registrate, `rollback --target NOME_PREVIOUS` è ammesso
-solo se il nome coincide con `previous`, appartiene al namespace, ha manifest integro
-e passa validation con modello/dimensioni compatibili. Verificato nel codice CLI.
+Prezzo verificato sulla [pagina ufficiale del modello](https://developers.openai.com/api/docs/models/text-embedding-3-small):
+**0,02 USD per milione di token**, quindi **0,0000321 USD stimati** per 1.605 token.
+Proposta di budget autorizzato: **0,001 USD**, con limite operativo più restrittivo
+di **una sola richiesta, massimo 2.000 token e 12 chunk**, senza retry. A quel prezzo,
+2.000 token corrispondono a 0,00004 USD; non è un limite di spesa dell'intero account.
+Una richiesta già ricevuta può essere fatturata anche se il client scade.
 
-Fermarsi e mantenere/recuperare il precedente stato in presenza di: operatore o
-writer concorrente; revisione/digest/mount diversi dal piano; backup o restore non
-verificati; permessi Woo non read-only; corpus non concordato; limiti provider non
-applicabili; errore fetch/embedding/validation; stato attivo cambiato inaspettatamente;
-readiness negativa dopo deploy; immagini diverse sui volumi non ancora provate su
-copia. Nessun refactor, seed, reset, `down -v`, prune o cleanup automatico.
+Il runner proposto (`scripts/demo_candidate.py`, SHA-256
+`9ce30521960af8fe1172f476769f6c3d8cc43e126884854e0cb12b0a7dd7c1a6`)
+rende concreti i limiti assenti nel CLI generico:
+
+- `--allow-provider` obbligatorio; senza consenso il runner termina prima del registry.
+- Digest del manifest atteso: stop se cambia corpus, metadato, modello o chunking.
+- Controllo token/chunk prima di creare il client embedding.
+- Hook HTTP: endpoint/modello/dimensioni/testi esatti, massimo un dispatch.
+  Redirect e proxy d'ambiente disabilitati; retry SDK `0`.
+- Timeout HTTP 15 s e deadline globale **120 s**; un errore interrompe la build,
+  senza ripartenza automatica. Eventuali candidate parziali restano conservate.
+- Lock amministrativo prima del fetch, `Registry.build(..., promote=False)`,
+  validation completa del registry e verifica che active/previous non cambino.
+- Nessuna generazione, promozione, rollback o cleanup nel runner.
+
+Digest misurato del manifest:
+`00ada154e603cbc48b0d62896d6bff6373fb544957920bde216992cfdfd4fa3c`.
+Il nome candidate atteso è
+`kb-ac71fcb760ee03c0-00ada154e603cbc48b0d62896d6bff6373fb544957920bde216992cfdfd4fa3c`.
+È una **previsione dal corpus locale**, non una candidate già costruita o validata.
+
+## Fase candidate da autorizzare
+
+Serve ora consenso per **creare il volume `woo-chatbot_knowledge_state` e costruire
+soltanto la candidate**, includendo il corpus/provider/costo/limiti sopra. Non serve
+fermare la demo per la build; la legacy e il puntatore attivo devono restare invariati.
+
+Configurazione privata predisposta e validata con `docker compose config`:
+`<directory-backup>/candidate.compose.private.json`. Contiene solo il servizio
+ingest, immagine target esatta, rete esterna `woo-chatbot_default`, volume esterno
+`woo-chatbot_knowledge_state` → `/state/knowledge`, runner e tokenizer in sola
+lettura. Nessuna porta, dipendenza avviata o immagine scaricata implicitamente.
+Il comando predefinito **non** contiene `--allow-provider`, quindi non può avviare
+involontariamente embedding. Questa configurazione non è stata eseguita.
+
+Dopo consenso, ricontrollare revisioni, hash del runner, servizi, backup e corpus;
+creare il solo volume previsto. Usare il file privato esplicito e `--no-deps`:
+
+```bash
+# Stato iniziale; crea directory/lock, quindi solo dopo consenso operativo.
+docker compose --env-file /dev/null -f PERCORSO_PRIVATO run --rm --no-deps \
+  ingest python -m app.ingest status
+# Build con i limiti verificati; il digest va preso dall'inventario approvato.
+docker compose --env-file /dev/null -f PERCORSO_PRIVATO run --rm --no-deps \
+  ingest python /operations/demo_candidate.py --allow-provider \
+  --expected-manifest DIGEST_APPROVATO
+```
+
+Non usare ingestion senza argomenti: il CLI ordinario costruisce **e promuove**.
+Dopo la build presentare nome completo reale, digest, conteggio, dimensione,
+metadati, ID/citazioni e tutte le validazioni del registry. Nessun manifest nella PR.
+Chiedere quindi **go/no-go separato per promozione e deploy**.
+
+## Promozione e recupero successivi
+
+API e ingest dovranno condividere lo stesso volume POSIX locale e namespace.
+Per il deploy preparare API standalone dal wheel verificato, widget fissato al
+target, un solo worker, semantic-only e retry retrieval disabilitato. Ricreare
+soltanto API; non applicare un `compose up` generale ai vecchi container WP/DB/Chroma.
+Mantenere read-only Woo, identità server-side, ordini filtrati per proprietario,
+history autorevole e demo abilitata solo su esplicita scelta in development.
+
+Finestra proposta per promozione/deploy: fino a 5 minuti, da autorizzare dopo la
+candidate. Fermare/drainare API, promuovere il nome esatto autorizzato con il CLI,
+avviare solo API e verificare immagine/revisione, mount condiviso, `status`,
+`/health`, **`/ready` HTTP 200**, widget statico e `/session/config`. Sessioni e
+contatori in memoria si perdono al riavvio; nessuna promessa di zero downtime.
+Non disabilitare controlli per ottenere readiness positiva. Non chiamare `/chat`.
+
+**Prima promozione da legacy:** `previous` sarà `null`;
+`rollback --target woo_knowledge` non recupera la legacy. In caso di fallimento:
+fermare API/amministrazioni, conservare lo stato nuovo per diagnosi, ripristinare
+in volumi separati il Chroma del backup verificato e l'assenza preesistente del
+registro, poi ricreare l'app con immagine, configurazione e sorgenti precedenti.
+Ricollegare soltanto la coppia recuperata verificata; nessuna modifica manuale
+al puntatore o ai lock del volume migrato. La prova effettuata certifica startup,
+lettura Chroma e widget, **non** autenticazione/ordini reali o qualità del modello.
+
+Per versioni già registrate, `rollback --target NOME_PREVIOUS` richiede esatta
+corrispondenza con `previous`, namespace corretto, manifest integro, modello e
+dimensioni compatibili e validation completa. Verificato nel codice del CLI.
+
+Condizioni di stop: writer/operatore concorrente; revisione/digest/mount cambiati;
+backup non disponibile o incoerente; corpus non concordato; permessi Woo diversi
+da read; budget superato; errore fetch/embedding/validation; modifica inattesa
+all'attiva; readiness negativa dopo deploy. Nessun reset, seed, `down -v`, prune,
+cleanup automatico di KB/backup o refactor fuori perimetro.
 
 ## Consegna al follow-up live
 
-Prerequisiti verificati: revisione integrata disponibile, digest server coincidenti,
-legacy presente, CLI versionato e target Compose coerenti a livello dichiarativo,
-liveness e widget statico raggiungibili. Restano da autorizzare ed eseguire backup/
-restore, prove offline attuali, ingestion e deploy; serve poi il go/no-go sulla
-candidate. Attiva/precedente finali non disponibili: migrazione non completata.
-Nessuna evidenza di qualità semantica o browser è stata prodotta. Il follow-up live
-richiederà un proprio consenso preciso per chiamate a pagamento e scenari di chat.
+Verificati: target integrato, build, test offline e integrazione sintetica, backup
+coerente, recupero isolato, persistenza della legacy, chiave read-only, corpus e
+costo stimati, runner limitato. Restano **NON ESEGUITI** candidate, promozione,
+deploy e readiness live finale. Active/previous registrati sono ancora assenti.
+La migrazione non è completata e la PR resta bozza. Il follow-up live richiederà
+consenso distinto per chiamate chat, modelli, corpus, budget e scenari browser.
