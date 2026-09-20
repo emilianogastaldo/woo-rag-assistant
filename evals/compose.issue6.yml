@@ -15,23 +15,23 @@ services:
       PYTHONPATH: /app:/
     volumes:
       - .:/evals:ro
-    command: uvicorn evals.issue5_fake_upstream:app --host 0.0.0.0 --port 9000
-  api:
+    command: uvicorn evals.issue6_fake_upstream:app --host 0.0.0.0 --port 9000
+  api: &api
     image: woo-chatbot-chatbot-api:latest
     pull_policy: never
-    environment:
+    environment: &api-env
       PYTHONPATH: /app:/
       OPENAI_API_KEY: synthetic-secret
       OPENAI_MODEL: synthetic-chat
       EMBEDDING_MODEL: synthetic-embedding
       OPENAI_BASE_URL: http://upstream:9000/v1
-      PROVIDER_TIMEOUT_SECONDS: "0.2"
+      PROVIDER_TIMEOUT_SECONDS: "2"
       PROVIDER_RETRY_ATTEMPTS: "1"
       WC_BASE_URL: http://upstream:9000/wp-json/wc/v3
       WC_SIGN_URL: http://upstream:9000/wp-json/wc/v3
       WC_CONSUMER_KEY: synthetic-key
       WC_CONSUMER_SECRET: synthetic-secret
-      WC_TIMEOUT_SECONDS: "0.2"
+      WC_TIMEOUT_SECONDS: "2"
       WC_RETRY_ATTEMPTS: "1"
       CHROMA_HOST: chroma
       CHROMA_PORT: "8000"
@@ -40,15 +40,42 @@ services:
       RETRIEVAL_STRATEGY: hybrid
       AGENT_MAX_ATTEMPTS: "12"
       AGENT_RETRY_BUDGET: "2"
-      REQUEST_DEADLINE_SECONDS: "1.5"
+      REQUEST_DEADLINE_SECONDS: "10"
       SESSION_SECRET: synthetic-session
       DEMO_ENABLED: "true"
+      CUSTOMER_CACHE_TTL_SECONDS: "2"
+      CUSTOMER_CACHE_CAPACITY: "1"
       RATE_LIMIT_REQUESTS: "100"
+      WIDGET_DIR: /widget
       LANGCHAIN_TRACING_V2: "false"
       ANONYMIZED_TELEMETRY: "false"
     volumes:
       - ../chatbot:/app:ro
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+      - ../widget:/widget:ro
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers
+  disabled:
+    <<: *api
+    environment:
+      <<: *api-env
+      DEMO_ENABLED: "false"
+      APP_ENV: production
+      SESSION_SECRET: synthetic-production-secret-with-40-characters
+  limits:
+    <<: *api
+    environment:
+      <<: *api-env
+      CONVERSATION_TTL_SECONDS: "2"
+      CONVERSATION_CAPACITY: "2"
+      CONVERSATION_MAX_TURNS: "2"
+      RATE_LIMIT_REQUESTS: "8"
+      RATE_LIMIT_WINDOW_SECONDS: "3"
+  widget:
+    image: node:22-alpine
+    pull_policy: never
+    volumes:
+      - ../widget:/widget:ro
+      - .:/evals:ro
+    command: node /evals/widget_security.mjs
   runner:
     image: woo-chatbot-chatbot-api:latest
     pull_policy: never
@@ -59,8 +86,9 @@ services:
     volumes:
       - ../chatbot:/app:ro
       - .:/evals:ro
-      - ${ISSUE5_RESULTS:?}:/results
-    command: python -m evals.issue5_integration --phase healthy
+      - ../widget:/widget:ro
+      - ${ISSUE6_RESULTS:?}:/results
+    command: python -m evals.issue6_integration --phase healthy
 networks:
   default:
     internal: true

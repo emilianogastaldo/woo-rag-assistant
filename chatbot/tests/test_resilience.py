@@ -67,7 +67,9 @@ async def test_unknown_tool_is_reported_without_execution():
     ])
     result = await answer("prova", toolset=anon_toolset(), llm=llm)
     tool_message = next(message for message in llm.seen[1] if isinstance(message, ToolMessage))
-    assert tool_message.content == "Strumento non disponibile per questa conversazione."
+    assert json.loads(tool_message.content)["untrusted_data"] == (
+        "Strumento non disponibile per questa conversazione."
+    )
     assert result.tools_used == []
 
 
@@ -279,7 +281,7 @@ def test_endpoint_uses_stable_503_and_request_id_for_session_dependency(monkeypa
     )
     assert response.status_code == 503
     assert response.json() == {"detail": FALLBACK_REPLY}
-    assert response.headers["X-Request-ID"] == "req-test"
+    assert response.headers["X-Request-ID"] != "req-test"
     assert "Traceback" not in response.text
 
 

@@ -69,7 +69,7 @@ l'agente deve citare gli ID dei passaggi usati. Il backend valida le citazioni
 contro i soli chunk recuperati **nella richiesta corrente**, anche con più ricerche.
 Una fonte recuperata ma non citata non compare in `sources`.
 
-`POST /chat` restituisce `reply`, `sources`, `authenticated` e `tools_used`.
+`POST /chat` restituisce `conversation_id`, `reply`, `sources`, `authenticated` e `tools_used`.
 Ogni fonte contiene `title`, `url`, `type` e `chunk_ids`: solo gli ID effettivamente
 citati, deduplicati; la fonte compare una sola volta per URL e tipo. Il widget
 converte le citazioni valide in riferimenti numerati `[1]`, collegati alla fonte.
@@ -128,6 +128,7 @@ vanno copiate in `.env` come `WC_CONSUMER_KEY` / `WC_CONSUMER_SECRET`.
 
 ## Demo
 
+La demo richiede `DEMO_ENABLED=true` in ambiente `development` (default: disabilitata).
 L'autenticazione della demo è mockata: il widget offre «Continua come ospite» oppure
 l'accesso come cliente demo. `POST /demo/login` emette un token firmato HMAC per uno
 dei clienti creati dal seed — cambia la *provenienza* dell'identità, non il modo in
@@ -179,16 +180,87 @@ solo operazioni di lettura: timeout, connessione, 429 (rispettando `Retry-After`
 5xx. I 4xx ordinari non sono ritentati. I retry impliciti dell'SDK OpenAI sono
 disabilitati. Nessun risultato RAG produce l'astensione documentale; Chroma o
 provider indisponibili producono invece il fallback temporaneo stabile.
-La generazione ha inoltre un limite di 512 token per chiamata. Il budget è di
-chiamate e tempo, non un tetto monetario; il provider può fatturare richieste
+La generazione ha inoltre un limite predefinito di 512 token per chiamata e un
+budget conservativo di token per turno (vedi sotto). Non è un tetto monetario; il provider può fatturare richieste
 ricevute anche quando il client scade o annulla l'attesa.
 
 FastAPI mantiene e chiude nei propri hook di lifecycle i client HTTP asincroni
 condivisi. I log operativi JSON contengono request/conversation ID, tool, durata,
 tentativo ed esito, senza argomenti dei tool, URL, prompt, token o eccezioni grezze.
-Il client può inviare `X-Request-ID` e `X-Conversation-ID` (massimo 64 caratteri
-alfanumerici/`._-`); gli ID non validi vengono sostituiti e `X-Request-ID` torna
-nella risposta.
+Gli ID di correlazione sono generati dal server; `X-Request-ID` e
+`X-Conversation-ID` del client vengono ignorati per impedire inserimento di dati
+sensibili nei log. `X-Request-ID` torna nella risposta. Access log Uvicorn disabilitato
+per non registrare query string; configurare allo stesso modo eventuali proxy.
+
+### Sessioni e nuovo contratto chat
+
+Inviare `POST /chat` con `{"message":"...","conversation_id":null}` per iniziare;
+nei turni successivi usare il `conversation_id` della risposta. Il server rifiuta
+`history`, ruoli e qualsiasi altro campo extra con 422 senza riflettere il payload.
+Il widget conserva solo il token e l'ID in memoria; login/logout azzerano anche il
+contenuto visibile e scartano le risposte pendenti della sessione precedente.
+
+Per clienti autenticati serve `Authorization: Bearer ...`. Ogni emissione del token
+ha un nonce distinto: una nuova sessione, anche dello stesso cliente, non può
+riprendere conversazioni precedenti. L'owner comprende anche il customer ID risolto.
+Per ospiti il server emette un cookie firmato `wrag_guest`, HttpOnly, SameSite=Lax
+(Secure in production); usare `credentials: "include"` e un'origine CORS esplicita.
+Il widget e l'API devono essere sullo stesso **site**; per domini diversi usare un
+reverse proxy sul dominio del negozio. Il solo conversation ID non autorizza accesso.
+
+`APP_ENV=production` rifiuta segreti vuoti, predefiniti o inferiori a 32 caratteri e
+rifiuta `DEMO_ENABLED=true`. Generare un segreto casuale; `.env.example` è solo un
+template di sviluppo. `/demo/login` è assente anche da OpenAPI quando disabilitato;
+`/session/config` consente al widget di nascondere i pulsanti demo. Il login reale
+Woo/SSO resta un'integrazione da fornire prima di esporre ordini in produzione.
+Il token demo è restituito solo dall'endpoint di login, senza campo email;
+nessuna credenziale viene inclusa nelle risposte chat.
+
+| Limite (default) | Comportamento |
+| --- | --- |
+| Sessione: 8 ore | Token invalido/scaduto: 401; mai degradazione silenziosa a ospite |
+| Conversazione: 30 minuti dalla creazione, 1000 voci | Scaduta/ignota/altrui: stesso 404; store pieno: 503 |
+| 20 turni, una richiesta attiva per conversazione | Limite o concorrenza: 409; iniziare una nuova conversazione |
+| Messaggio: 4000 byte UTF-8; body: 24000 byte | 422 / 413 prima del modello |
+| History: 16000 byte UTF-8 | Rimozione delle coppie user/assistant più vecchie; TTL non si rinnova |
+| Output tool: 12000 byte; contesto modello: 32000 byte | Tool troncato prima della delimitazione JSON; contesto eccedente: fallback |
+| Budget modello: 100000 unità conservative per turno | Prenota byte UTF-8 serializzati + overhead/schema + massimo output prima di ogni chiamata/retry; nessun rimborso |
+| Output modello: 512 token per chiamata | Limite inviato al provider, incluso nella prenotazione |
+| Cache email→ID: TTL fisso 300 s, capienza 1000 | Scadenza e rimozione LRU; nessun customer ID entra nel contesto |
+| `/chat`: 20 richieste / 60 s per IP, massimo 10000 chiavi | Finestra fissa; anche richieste invalide consumano quota; 429 con `Retry-After` in secondi |
+
+Le unità del budget sono una stima superiore conservativa per i tokenizer byte-pair
+OpenAI, non token fatturati misurati. Le chiamate embedding sono limitate da input,
+numero di tool/tentativi e deadline; il budget `MODEL_TOKEN_BUDGET` riguarda la
+generazione. Per provider/tokenizer diversi verificare la stima prima del deploy.
+Tutti i valori sono configurabili in `.env.example` e passati dal Compose.
+
+Store, cache e rate limiter sono **in memoria per processo**. Avviare un solo worker:
+riavvio/reload perde history, cache e quote; più worker hanno store separati e
+moltiplicano le quote. L'interfaccia `ConversationStore` è sostituibile per un futuro
+store condiviso; nessuna infrastruttura esterna viene introdotta. Le voci scadute
+sono eliminate alla successiva operazione, entro la capienza globale.
+
+Il rate limit usa il peer di rete, non header forniti dal client. Il Compose avvia
+Uvicorn con `--no-proxy-headers`: dietro proxy, tutti i client condividono la quota
+del proxy; configurare limiti al proxy per IP reali verificati. Nessuna espulsione
+di chiavi rate attive a capienza esaurita: nuove chiavi ricevono 429.
+
+Output tool/documenti/campi Woo rimangono `ToolMessage` nel campo JSON
+`untrusted_data`, separati dalle istruzioni di sistema. Il codice filtra gli ordini
+prima di formattare i pochi campi ammessi e oscura email, credenziali note e identità
+della sessione in input, history, output tool e risposta. Questo riduce i dati
+trasmessi; non è un sistema DLP capace di riconoscere ogni segreto arbitrario o
+codificato dentro documenti. Indicizzare soltanto conoscenza pubblica del negozio.
+Il modello non decide mai l'autorizzazione.
+
+Verifiche riproducibili e limiti: [report issue #6](docs/issue-6-results.md).
+```bash
+python3 evals/run_issue6_integration.py
+```
+L'harness usa API reali, Chroma dedicato, provider sintetici e test DOM del widget
+con HTTP reale, senza porte pubblicate né accesso esterno. Nessuna modifica a `.env`
+o alla demo condivisa.
 
 ## Valutazione
 

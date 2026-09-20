@@ -84,6 +84,24 @@ services:
       WC_TIMEOUT_SECONDS: ${WC_TIMEOUT_SECONDS:-5}
       WC_RETRY_ATTEMPTS: ${WC_RETRY_ATTEMPTS:-1}
       SESSION_SECRET: ${SESSION_SECRET}
+      APP_ENV: ${APP_ENV:-development}
+      DEMO_ENABLED: ${DEMO_ENABLED:-false}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
+      CONVERSATION_TTL_SECONDS: ${CONVERSATION_TTL_SECONDS:-1800}
+      CONVERSATION_CAPACITY: ${CONVERSATION_CAPACITY:-1000}
+      CONVERSATION_MAX_TURNS: ${CONVERSATION_MAX_TURNS:-20}
+      MESSAGE_MAX_BYTES: ${MESSAGE_MAX_BYTES:-4000}
+      HISTORY_MAX_BYTES: ${HISTORY_MAX_BYTES:-16000}
+      CHAT_BODY_MAX_BYTES: ${CHAT_BODY_MAX_BYTES:-24000}
+      MODEL_CONTEXT_MAX_BYTES: ${MODEL_CONTEXT_MAX_BYTES:-32000}
+      MODEL_TOKEN_BUDGET: ${MODEL_TOKEN_BUDGET:-100000}
+      MODEL_MAX_OUTPUT_TOKENS: ${MODEL_MAX_OUTPUT_TOKENS:-512}
+      TOOL_OUTPUT_MAX_BYTES: ${TOOL_OUTPUT_MAX_BYTES:-12000}
+      CUSTOMER_CACHE_TTL_SECONDS: ${CUSTOMER_CACHE_TTL_SECONDS:-300}
+      CUSTOMER_CACHE_CAPACITY: ${CUSTOMER_CACHE_CAPACITY:-1000}
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-20}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+      RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-10000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:8000}
       WIDGET_DIR: /widget
       RETRIEVAL_STRATEGY: ${RETRIEVAL_STRATEGY:-semantic}
@@ -108,7 +126,7 @@ services:
       # Il widget è servito dal backend su /widget per comodità di demo.
       - ./widget:/widget:ro
       - ./evals:/evals
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --no-proxy-headers
 
   # --- Pipeline di ingestion (one-shot, profilo dedicato) ---
   # Esecuzione: docker compose run --rm ingest

@@ -9,6 +9,7 @@ dei clienti creati dal seed. Il token è comunque firmato HMAC-SHA256 con
 `SESSION_SECRET`, quindi non è falsificabile lato client: cambia la provenienza
 dell'identità, non il modo in cui viene verificata.
 """
+
 from __future__ import annotations
 
 import base64
@@ -16,7 +17,9 @@ import binascii
 import hashlib
 import hmac
 import json
+import secrets
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from app.config import settings
@@ -55,36 +58,52 @@ def _signature(payload: bytes) -> str:
 
 def issue_token(email: str, ttl_seconds: int | None = None) -> str:
     """Emette un token di sessione firmato per l'email indicata."""
-    expires_at = int(time.time()) + (ttl_seconds or settings.session_ttl_seconds)
-    payload = json.dumps({"sub": email, "exp": expires_at}, separators=(",", ":")).encode()
+    expires_at = int(time.time()) + (
+        settings.session_ttl_seconds if ttl_seconds is None else ttl_seconds
+    )
+    payload = json.dumps(
+        {"sub": email, "exp": expires_at, "sid": secrets.token_urlsafe(24)}, separators=(",", ":")
+    ).encode()
     return f"{_b64encode(payload)}.{_signature(payload)}"
 
 
 def verify_token(token: str) -> str:
     """Verifica firma e scadenza, restituisce l'email. Solleva `SessionError`."""
+    if len(token) > 4096:
+        raise SessionError("token malformato")
     try:
         payload_b64, signature = token.split(".", 1)
         payload = _b64decode(payload_b64)
-        data = json.loads(payload)
     except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
         raise SessionError("token malformato") from exc
 
-    if not hmac.compare_digest(_signature(payload), signature):
+    if not signature.isascii() or not hmac.compare_digest(_signature(payload), signature):
         raise SessionError("firma non valida")
+    try:
+        data = json.loads(payload)
+    except (ValueError, UnicodeDecodeError, RecursionError) as exc:
+        raise SessionError("token malformato") from exc
     if not isinstance(data, dict) or not isinstance(data.get("sub"), str):
         raise SessionError("token malformato")
-    if int(data.get("exp", 0)) < time.time():
+    if type(data.get("exp")) is not int or not data["sub"]:
+        raise SessionError("token malformato")
+    if data["exp"] <= time.time():
         raise SessionError("sessione scaduta")
     return data["sub"]
 
 
-_customer_id_cache: dict[str, int] = {}
+_customer_id_cache: OrderedDict[str, tuple[int, float]] = OrderedDict()
 
 
 async def resolve_customer_id(email: str, client: WooClient | None = None) -> int | None:
     """Risolve l'ID cliente WooCommerce a partire dall'email (con cache)."""
+    now = time.monotonic()
+    for key, (_, expires) in list(_customer_id_cache.items()):
+        if expires <= now:
+            del _customer_id_cache[key]
     if email in _customer_id_cache:
-        return _customer_id_cache[email]
+        _customer_id_cache.move_to_end(email)
+        return _customer_id_cache[email][0]
 
     woo = client or shared_woo_client()
     rows = await woo.get_json("customers", {"email": email, "role": "all", "per_page": 1})
@@ -93,7 +112,9 @@ async def resolve_customer_id(email: str, client: WooClient | None = None) -> in
     if not rows:
         return None
     customer_id = int(rows[0]["id"])
-    _customer_id_cache[email] = customer_id
+    while len(_customer_id_cache) >= settings.customer_cache_capacity:
+        _customer_id_cache.popitem(last=False)
+    _customer_id_cache[email] = customer_id, time.monotonic() + settings.customer_cache_ttl_seconds
     return customer_id
 
 
