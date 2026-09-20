@@ -9,7 +9,7 @@ services:
     volumes:
       - data:/data
   runner:
-    image: woo-chatbot-chatbot-api:latest
+    image: woo-rag-api:issue7
     pull_policy: never
     user: "${LOCAL_UID:?}:${LOCAL_GID:?}"
     environment:

@@ -305,10 +305,36 @@ ordini incrociati e payload modello vengono verificati via HTTP.
 reale sulla rete interna: contratto, login/logout, scadenza, risposta tardiva e
 isolamento identità. **Non è un browser né una verifica visuale**: non prova layout,
 policy cookie/CORS del browser o rendering. Richiede l'immagine locale
-`node:22-alpine` oltre alle immagini API/Chroma; nessun download automatico.
+l’immagine Node fissata a digest nel Compose oltre alle immagini API/Chroma; nessun download automatico.
 
 I report sotto `evals/results/woo-issue6-*/` contengono inventario, hash codice/
 fixture, esiti, durata e contatori sintetici senza payload, token o email. Il numero
 di token dell'adapter è convenzionale, non tokenizzazione reale né consumo a
 pagamento. Cleanup verificato del solo progetto del run. Live esterno non eseguito:
 nessuna autorizzazione API/spesa è implicita nel lancio di questo harness.
+
+
+## Issue #7: ingestion e deployment
+
+`python3 evals/run_issue7_integration.py` costruisce immagini univoche e verifica
+API/ingest standalone (wheel installato, nessun mount del codice), WordPress con
+WooCommerce 10.0.4 e Chroma reali. Dataset `issue7-synthetic-v1`, nessun ordine o
+cliente reale, provider locali deterministici, rete Docker interna e nessuna porta.
+Include un secondo servizio API con sorgenti montati per il caso di sviluppo.
+
+Controlla query continue durante build/promozione/rollback, collisione fra processi,
+validation, fetch/embedding HTTP falliti, scrittura parziale, cleanup protetto e
+readiness all'avvio ritardato e dopo arresti mirati di WP/Chroma. Il runner audita
+configurazione e ownership, non legge `.env`, non modifica volumi `woo-chatbot_*`.
+Download dipendenze e Woo avvengono solo in build; esecuzione senza egress.
+
+Report schema 1 in `results/woo-issue7-*/inventory.json` e `scenarios.json`: commit,
+hash implementazione, immagini/risorse, casi, esiti, latenze e contatori del provider
+sintetico. Il benchmark agente resta schema 2 e usa dataset/fixture invariati per
+il confronto `issue-7-before.json`/`issue-7-after.json` con `--baseline` e 3 ripetizioni.
+Non confondere i contatori sintetici con token/costi di un modello esterno.
+
+La suite offline resta `network_mode: none` con DNS/socket bloccati da pytest;
+comprende anche costruzione wheel offline e import da installazione temporanea.
+Live esterno e migrazione della demo richiedono consenso separato. Dettagli:
+[guida ingestion/deployment](../docs/ingestion-deployment.md).

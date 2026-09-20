@@ -1,0 +1,12 @@
+FROM wordpress@sha256:f8aeb68164c6a04f5dcc91da30d8ffa096b0f7fafb7a65f144c2dd62587caca0 AS assets
+USER root
+RUN curl -fsSL https://downloads.wordpress.org/plugin/woocommerce.10.0.4.zip -o /tmp/woo.zip \
+    && echo '002b3cb8b1fcacf9836367a1ae617c87d6def0c33d16b8a79a4f81dad9894429  /tmp/woo.zip' | sha256sum -c - \
+    && unzip -q /tmp/woo.zip -d /opt
+
+FROM wordpress@sha256:cc795f5862b2f3891a805106917089558eef28a56755bd8ac8308d1ab57b28d7 AS wordpress
+COPY --from=assets /opt/woocommerce /usr/src/wordpress/wp-content/plugins/woocommerce
+
+FROM wordpress@sha256:f8aeb68164c6a04f5dcc91da30d8ffa096b0f7fafb7a65f144c2dd62587caca0 AS cli
+COPY evals/issue7_seed.php /seed.php
+COPY evals/issue7_seed.sh /seed.sh

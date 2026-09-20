@@ -114,9 +114,11 @@ non si conferma nemmeno che quell'ordine esista.
 
 ```bash
 cp .env.example .env                      # e valorizza le variabili
-docker compose up -d                      # ambiente completo
+docker compose up -d db wordpress chromadb # bootstrap servizi, prima del seed
 docker compose run --rm wpcli /seed/setup.sh   # installa WP/Woo e i dati demo
-docker compose run --rm ingest            # popola il vector store
+docker compose build chatbot-api ingest
+docker compose run --rm ingest            # solo dopo autorizzazione al provider/corpus
+docker compose up -d --wait chatbot-api    # attende WordPress/Woo, Chroma e KB pronta
 ```
 
 Il seed stampa le chiavi API read-only alla prima esecuzione (`__WC_KEYS__ <ck> <cs>`):
@@ -151,6 +153,29 @@ l'assistenza.
 | 4 | Mario | ordine di Luigi | «ordine non trovato» |
 | 5 | Mario | «Posso ancora restituire l'ordine 21?» | tool + RAG; scadenza dai 30 giorni dalla consegna verificata |
 | 6 | qualsiasi | «Che tempo farà domani?» | fuori dominio, declina |
+
+## Ingestion e deploy versionati
+
+L'ingestion costruisce una collection candidata con manifest deterministico,
+verifica record e vettori, poi cambia atomicamente il puntatore attivo. Fetch,
+embedding o scritture falliti preservano la versione precedente; ciascuna ricerca
+usa una sola versione per BM25, vettori e citazioni. API e ingest condividono il
+volume `knowledge_state` sullo stesso host Docker.
+
+`python -m app.ingest status` mostra attiva, precedente e candidate;
+`promote`, `rollback` e `cleanup` richiedono il nome esatto con `--target`.
+Cleanup protegge attiva, precedente e ricerche in corso. `/health` indica liveness;
+`/ready` verifica Woo e KB senza chiamate al provider. WordPress diventa healthy
+solo dopo il seed: al primo avvio seguire l'ordine dei comandi sopra.
+
+Dipendenze Python bloccate in `chatbot/requirements.lock`, immagini terze a digest,
+wheel completo installato nella build. L'harness `python3 evals/run_issue7_integration.py`
+verifica immagini standalone, servizi reali isolati e guasti con provider sintetici.
+
+Comandi, vincoli POSIX, backup, recovery e migrazione della demo:
+[guida operativa](docs/ingestion-deployment.md) e
+[risultati verificati](docs/issue-7-results.md).
+La demo esistente non viene reindicizzata automaticamente.
 
 ## Sviluppo
 

@@ -7,7 +7,7 @@ on:
 
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: chatbot
@@ -17,12 +17,15 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.14"
           cache: pip
-          cache-dependency-path: chatbot/pyproject.toml
+          cache-dependency-path: chatbot/requirements.lock
 
       - name: Installa il progetto con gli extra di sviluppo
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -r requirements.lock
+          pip install --no-deps --no-build-isolation -e ".[dev]"
+          pip check
 
       - name: Lint (ruff)
         run: ruff check . ../evals --config pyproject.toml

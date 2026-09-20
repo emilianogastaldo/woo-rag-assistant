@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     chroma_host: str = "chromadb"
     chroma_port: int = 8000
     chroma_collection: str = "woo_knowledge"
+    knowledge_state_dir: str = "/state/knowledge"
+    embedding_dimensions: int = Field(default=1536, ge=1, le=65536)
 
     # RAG: numero di chunk recuperati e distanza massima (coseno, 0=identico)
     # oltre la quale un chunk è considerato non pertinente. Vedi docs DEC-005:

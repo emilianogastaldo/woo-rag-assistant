@@ -7,6 +7,14 @@
 # =============================================================
 set -eu
 
+# service_started precedes WordPress copying core/config into a new volume.
+remaining=60
+while [ ! -f wp-config.php ]; do
+    remaining=$((remaining - 1))
+    [ "$remaining" -gt 0 ] || { echo "WordPress bootstrap timeout" >&2; exit 1; }
+    sleep 1
+done
+
 export WP_CLI_CACHE_DIR=/tmp/wpcache
 URL="http://localhost:8080"
 
@@ -28,7 +36,7 @@ if wp plugin is-active woocommerce 2>/dev/null; then
 	log "WooCommerce gia attivo"
 else
 	log "Installazione WooCommerce"
-	wp plugin install woocommerce --activate
+	wp plugin install woocommerce --version=10.0.4 --activate
 fi
 
 # --- 3. Permalink (necessari per /wp-json/wc/v3) ---

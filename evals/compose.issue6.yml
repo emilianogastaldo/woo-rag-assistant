@@ -9,7 +9,7 @@ services:
     volumes:
       - data:/data
   upstream:
-    image: woo-chatbot-chatbot-api:latest
+    image: woo-rag-api:issue7
     pull_policy: never
     environment:
       PYTHONPATH: /app:/
@@ -17,7 +17,7 @@ services:
       - .:/evals:ro
     command: uvicorn evals.issue6_fake_upstream:app --host 0.0.0.0 --port 9000
   api: &api
-    image: woo-chatbot-chatbot-api:latest
+    image: woo-rag-api:issue7
     pull_policy: never
     environment: &api-env
       PYTHONPATH: /app:/
@@ -70,14 +70,14 @@ services:
       RATE_LIMIT_REQUESTS: "8"
       RATE_LIMIT_WINDOW_SECONDS: "3"
   widget:
-    image: node:22-alpine
+    image: node@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
     pull_policy: never
     volumes:
       - ../widget:/widget:ro
       - .:/evals:ro
     command: node /evals/widget_security.mjs
   runner:
-    image: woo-chatbot-chatbot-api:latest
+    image: woo-rag-api:issue7
     pull_policy: never
     user: "${LOCAL_UID:?}:${LOCAL_GID:?}"
     environment:
