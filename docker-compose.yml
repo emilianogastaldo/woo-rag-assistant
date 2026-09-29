@@ -106,6 +106,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       DEMO_ENABLED: ${DEMO_ENABLED:-false}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
+      CONVERSATION_DB_PATH: /state/conversations/conversations.sqlite3
       CONVERSATION_TTL_SECONDS: ${CONVERSATION_TTL_SECONDS:-1800}
       CONVERSATION_CAPACITY: ${CONVERSATION_CAPACITY:-1000}
       CONVERSATION_MAX_TURNS: ${CONVERSATION_MAX_TURNS:-20}
@@ -143,6 +144,7 @@ services:
     volumes:
       - ./chatbot:/app
       - knowledge_state:/state/knowledge
+      - conversation_state:/state/conversations
       # Il widget è servito dal backend su /widget per comodità di demo.
       - ./widget:/widget:ro
       - ./evals:/evals
@@ -208,3 +210,4 @@ volumes:
   wp_data:
   chroma_data:
   knowledge_state:
+  conversation_state:

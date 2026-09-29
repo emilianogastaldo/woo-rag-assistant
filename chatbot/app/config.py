@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=28800, ge=1)
     app_env: Literal["development", "production"] = "development"
     demo_enabled: bool = False
+    conversation_db_path: str = "state/conversations.sqlite3"
     conversation_ttl_seconds: int = Field(default=1800, ge=1)
     conversation_capacity: int = Field(default=1000, ge=1)
     conversation_max_turns: int = Field(default=20, ge=1, le=100)

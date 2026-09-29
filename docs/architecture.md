@@ -425,10 +425,24 @@ conservativa per i tokenizer byte-pair usati, non telemetria né costo misurato.
 Contesto/budget esaurito restituiscono il fallback stabile. I token embedding non
 consumano questo budget, ma input, dispatch, retry e deadline restano limitati.
 
-Lo store è volutamente volatile e per processo: un worker per v1. Riavvio/reload
-perde history e quote; un altro worker non ha la conversazione e restituisce 404.
-La futura sostituzione deve rendere atomici owner/TTL/busy/commit e condividere
-anche il rate limiter; sticky session da sola non rende globali quote e capienza.
+L'integrazione di Modulo 3 · Lezione 12 aggiunge `SQLiteConversationStore`, che
+riusa i controlli di `MemoryConversationStore` e salva i turni completati con una
+transazione SQLite. La copia in memoria viene aggiornata solo dopo il commit su
+disco: un errore restituisce 503 e conserva la history precedente. Dopo riavvio si
+ricaricano owner, messaggi redatti, turni e scadenza assoluta (orologio Unix, non
+monotono); il flag busy non viene salvato, così un arresto non blocca la ripresa.
+Il TTL non viene rinnovato. Le righe scadute si eliminano all'avvio/acquisizione,
+con `secure_delete` attivo; i backup hanno una retention separata da gestire.
+
+Un lock POSIX per tutta la vita dello store impone un solo worker per database;
+Compose usa un volume dedicato `conversation_state`. La history sopravvive al
+riavvio del backend con la stessa identità di sessione e lo stesso ID; il reload
+del browser continua ad azzerare lo stato del widget. Rate limiter e cache restano
+per processo e perdono lo stato al riavvio. Prima di aggiungere worker servono
+store, quote e controllo della concorrenza condivisi. SQLite non cifra i messaggi:
+il file viene creato con permessi 0600 e il volume va protetto e incluso nei backup
+solo secondo la retention delle conversazioni. Non vengono archiviati token,
+customer ID, risultati tool o contenuti grezzi del provider.
 Cache email→ID: TTL fisso monotono, accesso LRU e rimozione prima dell'inserimento,
 con capienza globale per processo. Nessuna cache di errori o clienti inesistenti.
 

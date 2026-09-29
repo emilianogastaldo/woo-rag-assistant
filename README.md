@@ -260,11 +260,20 @@ numero di tool/tentativi e deadline; il budget `MODEL_TOKEN_BUDGET` riguarda la
 generazione. Per provider/tokenizer diversi verificare la stima prima del deploy.
 Tutti i valori sono configurabili in `.env.example` e passati dal Compose.
 
-Store, cache e rate limiter sono **in memoria per processo**. Avviare un solo worker:
-riavvio/reload perde history, cache e quote; più worker hanno store separati e
-moltiplicano le quote. L'interfaccia `ConversationStore` è sostituibile per un futuro
-store condiviso; nessuna infrastruttura esterna viene introdotta. Le voci scadute
-sono eliminate alla successiva operazione, entro la capienza globale.
+Le conversazioni sono salvate in **SQLite** dopo ogni turno completato. Un
+riavvio/reload del backend conserva history, owner, scadenza assoluta e contatore
+dei turni. Compose monta il volume `conversation_state`; nell'avvio Python locale
+`CONVERSATION_DB_PATH` indica il file (default `state/conversations.sqlite3`).
+La ripresa richiede lo stesso token/cookie valido e il `conversation_id`: il widget
+li conserva in memoria, quindi ricaricare la pagina avvia una nuova chat.
+
+Avviare un solo worker: un lock POSIX sul database impedisce a due processi di
+usare contemporaneamente lo stesso store. Cache e rate limiter restano in memoria
+e si azzerano al riavvio. Le conversazioni scadute vengono eliminate all'avvio e
+alla successiva acquisizione; un turno interrotto non viene salvato. SQLite contiene
+solo messaggi utente e risposte finali già redatti, più il digest dell'owner; il
+file non è cifrato. Proteggere volume e backup come dati di conversazione. Il file
+e il lock sono creati con permessi `0600`; un errore di salvataggio restituisce 503.
 
 Il rate limit usa il peer di rete, non header forniti dal client. Il Compose avvia
 Uvicorn con `--no-proxy-headers`: dietro proxy, tutti i client condividono la quota
@@ -286,6 +295,20 @@ python3 evals/run_issue6_integration.py
 L'harness usa API reali, Chroma dedicato, provider sintetici e test DOM del widget
 con HTTP reale, senza porte pubblicate né accesso esterno. Nessuna modifica a `.env`
 o alla demo condivisa.
+
+## Collegamento con Modulo 3 · Lezione 12
+
+Il laboratorio viene applicato ai dati del negozio: ingestion Woo/WordPress e
+Chroma per i documenti, tool REST scoped per i dati aggiornati, citazioni verificate
+e valutazione con risposte attese in `evals/golden.jsonl`. Le API WooCommerce
+coprono il ruolo delle tabelle SQL del laboratorio mantenendo l'autorizzazione
+per cliente. La persistenza SQLite completa l'obiettivo della chat riprendibile
+dopo il riavvio del backend, usando il loop agente già presente.
+
+`chatbot/tests/test_conversation_persistence.py` verifica offline il follow-up
+dopo riavvio per ospiti e clienti, l'isolamento fra sessioni, TTL, turni, capienza,
+concorrenza e rollback dopo un errore di scrittura. Per routing, fonti e risposte
+si riusa il runner di valutazione descritto sotto, con ripetizioni e baseline.
 
 ## Valutazione
 

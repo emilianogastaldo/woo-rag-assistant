@@ -285,7 +285,8 @@ def test_endpoint_uses_stable_503_and_request_id_for_session_dependency(monkeypa
     assert "Traceback" not in response.text
 
 
-def test_application_lifespan_closes_owned_http_clients():
+def test_application_lifespan_closes_owned_http_clients(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "conversation_db_path", str(tmp_path / "conversations.sqlite3"))
     with TestClient(main.app) as client:
         assert client.get("/health").status_code == 200
         woo_http = main.app.state.woo_client._client
