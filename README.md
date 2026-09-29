@@ -3,6 +3,9 @@
 Assistente clienti per e-commerce WooCommerce, basato su **RAG** e **tool calling**.
 Project work individuale per il Master AI Engineering (Boolean).
 
+Per preparare la presentazione: [traccia del progetto](docs/presentazione.md),
+con scaletta, demo, risultati verificati e prossimi miglioramenti.
+
 Il chatbot si incorpora in un negozio WooCommerce e:
 
 1. risponde sulla conoscenza statica del negozio (prodotti, FAQ, policy di spedizione
