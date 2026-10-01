@@ -1,6 +1,6 @@
 # Traccia per la presentazione — woo-rag-assistant
 
-Bozza aggiornata al 29 settembre 2026. Riferimento applicativo: commit `15b617a`.
+Bozza aggiornata al 1 ottobre 2026. Riferimento applicativo: commit `15b617a`.
 Da aggiornare con l'evoluzione del progetto; durata e formato della presentazione
 non sono ancora definiti. La scaletta propone circa 10 minuti, demo compresa.
 
@@ -80,6 +80,59 @@ Il widget conserva il proprio stato in memoria: ricaricare la pagina o cambiare
 sessione avvia ancora una nuova chat. Il TTL predefinito è di 30 minuti dalla
 creazione, non dall'ultimo messaggio.
 
+### Il contributo di M3 L14: il progetto personale
+
+La lezione chiede una repository propria, un README con l'obiettivo e un primo
+pezzo realizzato. Questo progetto li ha già: il problema è l'assistenza clienti
+WooCommerce e il primo percorso combina documenti, tool e controlli di accesso.
+La consegna non richiede tutte le tecnologie del corso; vanno scelte quelle utili
+al problema. Resta da verificare su GitHub l'accesso dei docenti alla repository.
+
+### Il contributo di M4 L01: gli otto elementi della harness
+
+Il modello propone una risposta o una chiamata a uno strumento. La **harness**
+è il software che prepara il contesto, esegue le azioni consentite, restituisce
+risultati e applica limiti. Nel progetto queste responsabilità sono distribuite
+fra agente, servizi e gestione delle conversazioni; non coincidono con il prompt.
+
+La tabella è un supporto per le domande: nella presentazione breve bastano il
+ciclo dei tool, un limite concreto e il controllo degli accessi.
+
+| Elemento della lezione | Dove si trova nel progetto | Comportamento e limite da spiegare |
+| --- | --- | --- |
+| Il giro | [`agent.py`](../chatbot/app/agent.py), `_answer()` | Aggiunge la risposta del modello e i risultati dei tool ai messaggi. Termina quando non ci sono altre chiamate a tool, oppure con un fallback al limite dei passi. |
+| I limiti | [`config.py`](../chatbot/app/config.py), `AttemptBudget` in [`resilience.py`](../chatbot/app/resilience.py) | Default: 4 passi, 12 tentativi complessivi, budget di 2 retry e scadenza di 30 secondi. `_invoke_model()` riserva unità di budget a partire dai byte del contesto e dall'output massimo: è una stima prudenziale, non una misura del costo monetario. |
+| Gli errori | `provider_call()`, `tool_failure_message()` e `_answer()` | Retry limitati per errori recuperabili; gli errori dei tool diventano messaggi utili al modello. Dopo 2 errori dello stesso tipo sullo stesso tool si interrompe la richiesta: non è un rilevatore generale di ogni ciclo possibile. |
+| Il contesto | `system_prompt()`, `_answer()` e [`conversations.py`](../chatbot/app/conversations.py) | Istruzioni, storia e domanda formano l'input; i risultati dei tool si aggiungono durante il giro. SQLite conserva gli scambi completati utente/risposta; la history elimina le coppie più vecchie oltre il limite in byte. Non c'è un riassunto automatico né persistenza dell'intera trace dei tool. |
+| Gli output | `untrusted_data()` in [`privacy.py`](../chatbot/app/privacy.py) | Maschera dati sensibili, limita il testo del risultato a 12.000 byte e lo racchiude come dato non fidato. Il taglio mantiene l'inizio: non salva un output completo su file né aggiunge un avviso di troncamento. |
+| I tool | `build_toolset()` in `agent.py` | `StructuredTool` espone nome, descrizione e schema Pydantic; il codice valida gli argomenti prima di invocare il servizio. Sono strumenti applicativi per RAG, catalogo e ordini, senza shell o editor di file. |
+| I permessi | `build_toolset()` e [`orders.py`](../chatbot/app/tools/orders.py) | Tool ordini assenti per gli ospiti, identità risolta dal backend e filtro per cliente nel servizio. I vincoli sono applicativi: non si tratta della sandbox di un coding agent. |
+| La traccia | [`observability.py`](../chatbot/app/observability.py), `AgentTrace` in `agent.py` | Log strutturati con ID di correlazione, tool, esito, durata ed errore; contatori opzionali di chiamate e token per gli eval. Non registra una conversazione completa con prompt, argomenti e risultati, né misura separatamente il risparmio della cache. |
+
+Frase da usare durante la presentazione:
+
+> Il modello sceglie quale informazione chiedere, ma il programma decide quali
+> strumenti esistono per quel cliente, controlla gli argomenti e ferma il giro
+> quando supera i limiti. La sicurezza non dipende dalla buona volontà del modello.
+
+La lezione mostra anche il vantaggio di un prefisso stabile per la cache. Il giro
+qui aggiunge messaggi in coda, ma la history può essere tagliata e il prompt varia
+con data e stato di autenticazione: non dichiariamo un tasso di cache o risparmi
+senza misurarli.
+
+Il confronto è stato fatto leggendo il codice esistente al 1 ottobre 2026:
+**questo aggiornamento della presentazione non introduce funzionalità né nuovi
+risultati di test**. La lezione suggerisce di riusare harness mantenute; passare
+all'Agents SDK richiederebbe un beneficio verificabile e test che preservino
+permessi, citazioni, limiti e memoria. Non è un requisito della consegna.
+
+### M4 L02: il materiale disponibile
+
+Al 1 ottobre è pubblicato il progetto Valtesa di partenza, senza slide o una
+consegna di modifica. Il titolo indica il metodo di lavoro con un coding agent:
+contesto, piano, diff e verifica. Non attribuiamo alla lezione nuove funzionalità
+WooCommerce o un obbligo di cambiare framework prima della consegna effettiva.
+
 ## 4. La demo da preparare (3 minuti)
 
 | Passo | Domanda o azione | Cosa mostrare |
@@ -146,6 +199,12 @@ a ogni lezione o aggiungere agenti, servizi e dipendenze senza un'esigenza misur
   risposte attese; la provenienza di una citazione non basta a garantire ogni frase.
 - **Perché non hai cambiato framework con la lezione 12?** Il loop già presente
   copriva orchestrazione e strumenti; il requisito mancante era la persistenza.
+- **Dov'è la harness nel tuo progetto?** Nel ciclo di `agent.py` e nei componenti
+  che gestiscono budget, errori, contesto, output, strumenti, permessi e log.
+  Il modello sceglie le azioni; questi componenti ne controllano l'esecuzione.
+- **Hai una trace completa come quella della lezione?** No: i log contengono
+  metadati operativi, SQLite gli scambi completati e gli eval contatori opzionali.
+  Non conservo automaticamente tutti i prompt e i risultati dei tool.
 - **È pronto per la produzione?** È un project work con controlli e prove
   riproducibili; autenticazione reale, valutazione live e requisiti operativi del
   negozio restano passaggi da completare.
