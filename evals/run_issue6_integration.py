@@ -31,14 +31,17 @@ def main() -> None:
             "XDG_RUNTIME_DIR",
         }
     }
-    env.update(
+    variables = dict(
         LOCAL_UID=str(os.getuid()),
         LOCAL_GID=str(os.getgid()),
         ISSUE6_RESULTS=str(output),
         TEST_COLLECTION=collection,
     )
+    # Explicit synthetic input also works when Compose drops inherited environment.
+    env_file = output / "compose.env"
+    env_file.write_text("".join(f"{key}={value}\n" for key, value in variables.items()))
     compose = ROOT / "evals" / "compose.issue6.yml"
-    base = ["docker", "compose", "--env-file", "/dev/null", "-f", str(compose), "-p", project]
+    base = ["docker", "compose", "--env-file", str(env_file), "-f", str(compose), "-p", project]
 
     def run(command, *, capture=True, timeout=180):
         return subprocess.run(
@@ -57,9 +60,10 @@ def main() -> None:
     }
     assert config["networks"]["default"]["internal"] is True
     assert not config["networks"]["default"].get("external")
-    assert set(config["volumes"]) == {"data"}
-    assert config["volumes"]["data"]["name"] == f"{project}_data"
-    assert not config["volumes"]["data"].get("external")
+    assert set(config["volumes"]) == {"data", "conversations"}
+    for name, volume in config["volumes"].items():
+        assert volume["name"] == f"{project}_{name}"
+        assert not volume.get("external")
     mounts = {
         "widget": {"/widget": ROOT / "widget", "/evals": ROOT / "evals"},
         "api": {"/app": ROOT / "chatbot", "/widget": ROOT / "widget"},
@@ -87,8 +91,14 @@ def main() -> None:
         )
         assert set(service["networks"]) == {"default"}
         if name in mounts:
-            assert len(service["volumes"]) == len(mounts[name])
+            persistent = name in {"api", "disabled", "limits"}
+            assert len(service["volumes"]) == len(mounts[name]) + persistent
             for mount in service["volumes"]:
+                if mount["type"] == "volume":
+                    assert name in {"api", "disabled", "limits"}
+                    assert mount["source"] == "conversations" and mount["target"] == "/state"
+                    assert not mount.get("read_only")
+                    continue
                 assert mount["type"] == "bind"
                 assert Path(mount["source"]).resolve() == mounts[name][mount["target"]].resolve()
                 assert bool(mount.get("read_only")) == (mount["target"] != "/results")
@@ -96,6 +106,10 @@ def main() -> None:
             assert len(service["volumes"]) == 1
             assert service["volumes"][0]["source"] == "data"
             assert service["volumes"][0]["type"] == "volume"
+    for name in ("api", "disabled", "limits"):
+        assert config["services"][name]["environment"]["CONVERSATION_DB_PATH"] == (
+            f"/state/{name}.sqlite3"
+        )
     api_env = config["services"]["api"]["environment"]
     assert api_env["CHROMA_COLLECTION"] == collection
     assert api_env["OPENAI_BASE_URL"] == "http://upstream:9000/v1"
@@ -104,7 +118,11 @@ def main() -> None:
     assert not run(
         ["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={project}"]
     ).stdout.strip()
-    for resource, name in (("volume", f"{project}_data"), ("network", f"{project}_default")):
+    for resource, name in (
+        ("volume", f"{project}_data"),
+        ("volume", f"{project}_conversations"),
+        ("network", f"{project}_default"),
+    ):
         assert (
             name not in run(["docker", resource, "ls", "--format", "{{.Name}}"]).stdout.splitlines()
         )
@@ -112,12 +130,23 @@ def main() -> None:
         "project": project,
         "collection": collection,
         "network": f"{project}_default",
-        "volume": f"{project}_data",
+        "volumes": [f"{project}_data", f"{project}_conversations"],
         "ports": [],
         "internal_network": True,
         "credentials": "synthetic",
         "status": "RUNNING",
-        "schema_version": 1,
+        "schema_version": 2,
+        "harness_sha256": hashlib.sha256(
+            b"".join(
+                (ROOT / "evals" / name).read_bytes()
+                for name in (
+                    "run_issue6_integration.py",
+                    "issue6_integration.py",
+                    "compose.issue6.yml",
+                )
+            )
+        ).hexdigest(),
+        "working_tree_dirty": bool(run(["git", "status", "--porcelain"]).stdout.strip()),
         "implementation_sha256": hashlib.sha256(
             b"".join(p.read_bytes() for p in sorted((ROOT / "chatbot" / "app").rglob("*.py")))
         ).hexdigest(),
@@ -171,9 +200,54 @@ def main() -> None:
             [*base, "up", "-d", "--no-build", "chroma", "upstream", "api", "disabled", "limits"],
             capture=False,
         )
-        for phase in ("healthy", "restarted"):
-            if phase == "restarted":
-                run([*base, "restart", "api"], capture=False)
+
+        def snapshot():
+            return json.loads(
+                run(
+                    [
+                        *base,
+                        "exec",
+                        "-T",
+                        "api",
+                        "python",
+                        "-c",
+                        "import json, sqlite3; "
+                        "db = sqlite3.connect('file:/state/api.sqlite3?mode=ro', uri=True); "
+                        "print(json.dumps(db.execute("
+                        "'SELECT id, owner, expires, turns, history FROM conversations ORDER BY id'"
+                        ").fetchall()))",
+                    ]
+                ).stdout
+            )
+
+        log_command = [*base, "logs", "--no-log-prefix", "--no-color", "api", "disabled", "limits"]
+        previous_logs = ""
+        for phase in ("healthy", "restarted", "recreated"):
+            if phase != "healthy":
+                before = snapshot()
+                assert before
+                old_id = run([*base, "ps", "-q", "api"]).stdout.strip()
+                if phase == "restarted":
+                    run([*base, "restart", "api", "limits"], capture=False)
+                else:
+                    previous_logs = run(log_command).stdout
+                    run(
+                        [
+                            *base,
+                            "up",
+                            "-d",
+                            "--no-deps",
+                            "--no-build",
+                            "--force-recreate",
+                            "api",
+                            "limits",
+                        ],
+                        capture=False,
+                    )
+                new_id = run([*base, "ps", "-q", "api"]).stdout.strip()
+                assert (old_id == new_id) == (phase == "restarted")
+                assert snapshot() == before
+                inventory[phase + "_unchanged_database"] = "PASS"
             run(
                 [
                     *base,
@@ -190,6 +264,10 @@ def main() -> None:
                 ],
                 capture=False,
             )
+            if phase != "healthy":
+                after = {row[0]: row for row in snapshot()}
+                assert all(after[row[0]][1:3] == row[1:3] for row in before)
+                inventory[phase + "_absolute_expiry"] = "PASS"
         try:
             widget = run([*base, "run", "--rm", "--no-deps", "-T", "widget"])
         except subprocess.CalledProcessError as exc:
@@ -197,9 +275,7 @@ def main() -> None:
             raise
         (output / "widget.json").write_text(widget.stdout)
         print(widget.stdout.strip())
-        logs = run(
-            [*base, "logs", "--no-log-prefix", "--no-color", "api", "disabled", "limits"]
-        ).stdout
+        logs = previous_logs + "\n" + run(log_command).stdout
         assert not any(
             value in logs
             for value in (
@@ -230,7 +306,10 @@ def main() -> None:
         assert not run(
             ["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={project}"]
         ).stdout.strip()
-        for resource, name in (("volume", inventory["volume"]), ("network", inventory["network"])):
+        for resource, name in [
+            *(("volume", v) for v in inventory["volumes"]),
+            ("network", inventory["network"]),
+        ]:
             assert (
                 name
                 not in run(["docker", resource, "ls", "--format", "{{.Name}}"]).stdout.splitlines()
