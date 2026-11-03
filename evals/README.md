@@ -46,16 +46,16 @@ docker compose run --rm --no-deps eval-offline python -m evals.run_agent_eval \
 Il live invia a OpenAI le domande, il prompt, le descrizioni dei tool, il corpus
 sintetico versionato e i risultati sintetici dei tool. Non legge ordini reali.
 Richiede `OPENAI_API_KEY`; usa `OPENAI_MODEL` e `EMBEDDING_MODEL` del backend.
-Le due opzioni di consenso sono obbligatorie, anche quando la chiave è già presente:
+Le opzioni di consenso e un budget preventivo sono obbligatori anche con chiave presente:
 
 ```bash
 # ESEGUIRE SOLTANTO DOPO AUTORIZZAZIONE ESPLICITA alle chiamate esterne.
 docker compose run --rm --no-deps -e PYTHONPATH=/app:/ chatbot-api \
-  python -m evals.run_agent_eval --live --allow-external --repeats 3 \
+  python -m evals.run_agent_eval --live --allow-external --max-estimated-usd 5.00 --repeats 3 \
   --output /evals/results/live-before.json
 # Dopo la modifica da confrontare, mantenendo stesso dataset/fixture/ripetizioni:
 docker compose run --rm --no-deps -e PYTHONPATH=/app:/ chatbot-api \
-  python -m evals.run_agent_eval --live --allow-external --repeats 3 \
+  python -m evals.run_agent_eval --live --allow-external --max-estimated-usd 5.00 --repeats 3 \
   --baseline /evals/results/live-before.json --output /evals/results/live-after.json
 ```
 
@@ -293,12 +293,18 @@ Risultati, regressione trovata nel retry e decisione finale in
 python3 evals/run_issue6_integration.py
 ```
 
-Il runner non legge `.env`: crea un progetto/collection/volume univoci, controlla
+Il runner non legge `.env`: scrive un `compose.env` con sole variabili sintetiche
+e crea progetto, collection e volumi univoci; controlla
 nomi, mount, endpoint, immagini, assenza di porte e rete `internal`, poi avvia tre
 processi API (demo, production senza demo, limiti ridotti), Chroma e provider
 Woo/OpenAI-compatible sintetici. Due ulteriori avvii production devono fallire con
-secret vuoto/predefinito. Riavvia soltanto la propria API per verificare perdita
-history e prova accesso da un altro processo allo stesso ID. Cache, TTL, rate limit,
+secret vuoto/predefinito. Riavvia e ricrea soltanto le proprie API demo/limiti,
+conservando il volume SQLite del test e usando file distinti per ogni processo.
+Verifica history di clienti e ospiti, isolamento anche fra sessioni dello stesso
+cliente, contatore turni, scadenza assoluta invariata e rifiuto delle conversazioni
+scadute. Controlla che il container cambi ID solo alla ricreazione, confronta il
+database prima/dopo e prova accesso da un altro processo con database separato.
+Cache, TTL, rate limit,
 ordini incrociati e payload modello vengono verificati via HTTP.
 
 `widget_security.mjs` esegue il JS del widget in un DOM minimale Node contro l'API
@@ -313,6 +319,15 @@ di token dell'adapter è convenzionale, non tokenizzazione reale né consumo a
 pagamento. Cleanup verificato del solo progetto del run. Live esterno non eseguito:
 nessuna autorizzazione API/spesa è implicita nel lancio di questo harness.
 
+
+Esiti della verifica con persistenza: [report issue #16](../docs/issue-16-results.md).
+
+## Issue #17–19: valutazione, login e dati di test
+
+- [#17: scenari contestuali, preflight e contabilità](../docs/issue-17-results.md).
+  Nessuna misura live eseguita; il budget preventivo non è un limite di fatturazione.
+- [#18: ponte login WordPress e test di isolamento](../docs/issue-18-results.md).
+- [#19: seed e import CSV nativo ripetibile](../docs/issue-19-results.md).
 
 ## Issue #7: ingestion e deployment
 

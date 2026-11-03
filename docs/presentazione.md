@@ -159,15 +159,17 @@ per dati e costi; non è stata eseguita durante la preparazione di questa tracci
 | --- | --- |
 | Integrazione lezione 12, commit `15b617a`: 62 test offline mirati e lint superati | Store SQLite e API verificati con riapertura dello store/lifespan, follow-up, identità, limiti e scrittura fallita; provider sostituiti nei test. |
 | [Report issue 7](issue-7-results.md), versione precedente `18ff205` | Documenta 226 test e prove Docker isolate su ingestion e deployment. Sono risultati storici, non una nuova esecuzione sull'ultima versione. |
+| [Report issue 16](issue-16-results.md), verifica Docker del 3 novembre 2026 | Riavvio e ricreazione conservano history, limiti e scadenza; isolamento delle sessioni e cleanup verificati con provider sintetici. |
 | Golden dataset: 30 casi, con runner e confronto baseline | Esiste una procedura per confrontare routing, fonti, risposte e regressioni. I risultati con modello simulato verificano il software, non l'accuratezza di un LLM reale. |
 
 I 62 test sono una selezione mirata, non si sommano ai 226 del report precedente.
-La nuova persistenza non è ancora stata verificata con un riavvio reale del container
-in questa sessione. Il [report issue 6](issue-6-results.md) descrive il vecchio store
-volatile: le sue aspettative sul riavvio sono storiche e vanno aggiornate nel relativo
-harness prima di usarlo per validare la nuova versione.
+La persistenza è ora verificata anche con riavvio e ricreazione reali dei container
+nel [report issue 16](issue-16-results.md). Il [report issue 6](issue-6-results.md)
+descrive il vecchio store volatile: le sue aspettative sul riavvio restano storiche;
+l’harness è stato aggiornato alla persistenza SQLite.
 
-Limiti da dichiarare: login WooCommerce reale ancora da integrare; widget senza
+Limiti da dichiarare: ponte login WooCommerce verificato localmente, deployment pubblico
+HTTPS/cache ancora da verificare; widget senza
 ripresa dopo reload; un solo worker; cronologia su disco non cifrata; qualità delle
 risposte e costi live da misurare. Non presentare percentuali offline come accuratezza
 generale o tempi sintetici come latenza reale per il cliente.
@@ -178,10 +180,9 @@ Questa è una lista di priorità, non di funzionalità già implementate.
 
 | Priorità | Intervento | Criterio di completamento |
 | --- | --- | --- |
-| Prima della prossima demo | Aggiornare il test Docker sul riavvio per lo store persistente | Stessa sessione + ID recuperano la history; altra sessione e conversazione scaduta restano escluse, anche dopo ricreazione del container con lo stesso volume. |
 | Prima di dichiarare la qualità | Eseguire un confronto live autorizzato su domande rappresentative, comprese ambiguità e follow-up | Risposte attese, ripetizioni, correttezza, fonti, astensioni, latenza e consumo riportati con modello e versione. |
 | Se serve continuità durante la navigazione | Riprendere la chat dopo reload del browser | Ripristino autorizzato della conversazione; logout e cambio cliente isolano i dati. Progettare la sessione senza salvare token sensibili in localStorage. |
-| Prima di usare ordini reali | Collegare il login reale del negozio | Identità verificata end-to-end e test di isolamento fra clienti. |
+| Prima di usare ordini reali | Configurare il ponte login nel deployment reale | HTTPS, cache nonce e rate limit dimensionati; isolamento già verificato su utenti sintetici ([#18](issue-18-results.md)). |
 | Quando le misure mostrano errori di retrieval | Confrontare semantic e hybrid; valutare reranking | Miglioramento sullo stesso dataset senza regressioni rilevanti e con costi/tempi accettabili. |
 
 Le prossime lezioni possono suggerire soluzioni a questi problemi. Per ogni nuova

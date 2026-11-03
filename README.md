@@ -240,7 +240,10 @@ reverse proxy sul dominio del negozio. Il solo conversation ID non autorizza acc
 rifiuta `DEMO_ENABLED=true`. Generare un segreto casuale; `.env.example` è solo un
 template di sviluppo. `/demo/login` è assente anche da OpenAPI quando disabilitato;
 `/session/config` consente al widget di nascondere i pulsanti demo. Il login reale
-Woo/SSO resta un'integrazione da fornire prima di esporre ordini in produzione.
+WordPress/WooCommerce è disponibile tramite il ponte opzionale della
+[issue #18](docs/issue-18-results.md): verifica cookie e nonce a ogni turno,
+con un segreto separato e token backend mai esposti al browser. Prima di usarlo
+in produzione configurare HTTPS/rete privata, cache delle pagine e rate limit.
 Il token demo è restituito solo dall'endpoint di login, senza campo email;
 nessuna credenziale viene inclusa nelle risposte chat.
 
@@ -328,9 +331,13 @@ docker compose run --rm --no-deps eval-offline python -m evals.run_agent_eval --
 I report JSON in `evals/results/` misurano routing, hit@k/MRR, precisione delle
 citazioni, validità degli ID, correttezza/astensione, latenza e chiamate, senza salvare
 conversazioni o segreti. `--baseline` evidenzia le regressioni per domanda. Il live richiede
-**entrambi** `--live --allow-external` e usa solo dati sintetici; anche il precedente
+`--live --allow-external --max-estimated-usd <budget>` e usa solo dati sintetici; anche il precedente
 sweep di retrieval è ora protetto da opt-in. Comandi, costi, definizioni delle
 metriche e limiti sono in [`evals/README.md`](evals/README.md).
+
+Il [report #17](docs/issue-17-results.md) documenta i casi contestuali aggiuntivi,
+preflight e costi da usage; le prove con provider reale restano da autorizzare.
+Per caricare prodotti di prova, vedere il [confronto seed/CSV ufficiale #19](docs/issue-19-results.md).
 
 ## Stack
 
