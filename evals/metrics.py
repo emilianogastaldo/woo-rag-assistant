@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from math import ceil
 from pathlib import Path
-from statistics import mean
+from statistics import mean, median
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -43,6 +44,13 @@ COUNTERS = (
 )
 
 
+class HistoryTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["human", "ai"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class Case(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -59,6 +67,7 @@ class Case(BaseModel):
     expected_outcome: Literal["answer", "abstain", "decline", "login", "not_found"]
     answer_all: list[str] = Field(min_length=1)
     answer_none: list[str] = Field(default_factory=list)
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
     def consistent(self):
@@ -270,6 +279,11 @@ def aggregate(rows):
         values = [r["metrics"][key] for r in rows if r["metrics"][key] is not None]
         summary[key] = {"mean": mean(values) if values else None, "n": len(values)}
     summary["pass_rate"] = {"mean": mean(float(r["passed"]) for r in rows), "n": len(rows)}
+    latencies = sorted(r["metrics"]["latency_ms"] for r in rows)
+    summary["latency_ms"].update({
+        "p50": median(latencies), "p95": latencies[ceil(len(latencies) * 0.95) - 1],
+        "max": max(latencies),
+    })
     return summary
 
 

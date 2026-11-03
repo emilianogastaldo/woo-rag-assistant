@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import time
-from contextlib import nullcontext
+from contextlib import AsyncExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,12 +17,15 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGCHAIN_TRACING"] = "false"
 os.environ["ANONYMIZED_TELEMETRY"] = "false"
 
+from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
+
 from app import agent  # noqa: E402
 from app.agent import AgentResult, AgentTrace, answer, build_toolset  # noqa: E402
 from app.auth.session import Session  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.tools.catalog import CatalogService  # noqa: E402
 from app.tools.orders import OrderService  # noqa: E402
+from evals.costs import SETUP_TIMEOUT_SECONDS, cost_estimate, measured_cost  # noqa: E402
 from evals.fixtures import (  # noqa: E402
     AS_OF,
     FakeStore,
@@ -59,29 +63,46 @@ def estimate(case_count, repeats, max_steps):
         "embedding_requests_max": 1 + turns * per_turn_attempts,
         "external_attempts_max": turns * per_turn_attempts,
         "shared_retries_max": turns * per_turn_retries,
-        "generation_output_tokens_max": turns * generation_max * 512,
+        "generation_output_tokens_max": turns * generation_max * settings.model_max_output_tokens,
         "corpus_embedding_requests": 1,
         "provider_retry_attempts_per_operation": settings.provider_retry_attempts,
         "retrieval_retries_max": turns * min(
             per_turn_retries, max_steps * settings.retrieval_retry_attempts
         ),
         "note": "Cost depends on input/output and embedding tokens and provider prices. No judge.",
+        **cost_estimate(turns, turns * generation_max, 1 + turns * per_turn_attempts),
     }
 
 
-async def evaluate(cases, repeats=1, live=False, allow_external=False, commit=None):
+async def evaluate(
+    cases, repeats=1, live=False, allow_external=False, commit=None, max_estimated_usd=None,
+):
     # La guardia esiste anche nell'API Python, non solo nel parser CLI.
     if live and not allow_external:
         raise ValueError("live evaluation requires explicit --allow-external")
+    if live and max_estimated_usd is None:
+        raise ValueError("live evaluation requires explicit budget --max-estimated-usd")
     if repeats < 1 or not cases:
         raise ValueError("positive repeats and non-empty cases required")
+    if max_estimated_usd is not None:
+        estimate_usd = estimate(len(cases), repeats, settings.agent_max_steps)["estimated_usd_max"]
+        if (not math.isfinite(max_estimated_usd) or max_estimated_usd <= 0
+                or estimate_usd is None or estimate_usd > max_estimated_usd):
+            raise ValueError("unsupported pricing or estimate exceeds consented budget")
     rows = []
+    generation_requests_without_usage = 0
     started = time.perf_counter()
-    with nullcontext() if live else offline_network(), patch("app.agent.date", FrozenDate):
+    async with AsyncExitStack() as resources:
+        if not live:
+            resources.enter_context(offline_network())
+        resources.enter_context(patch("app.agent.date", FrozenDate))
         if live:
             from evals.live import build_model, prepare_store
 
-            store = await prepare_store()
+            async with asyncio.timeout(SETUP_TIMEOUT_SECONDS):
+                store = await prepare_store()
+            if hasattr(getattr(store, "embeddings", None), "aclose"):
+                resources.push_async_callback(store.embeddings.aclose)
         else:
             store = FakeStore()
         setup_ms = (time.perf_counter() - started) * 1000
@@ -109,6 +130,11 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False, commit=No
                     result = await answer(
                         case.question,
                         session=session,
+                        history=[
+                            (HumanMessage if turn.role == "human" else AIMessage)(
+                                content=turn.content,
+                            ) for turn in case.history
+                        ],
                         toolset=toolset,
                         llm=model,
                         trace=trace,
@@ -128,6 +154,7 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False, commit=No
                 )
                 row["repeat"] = repeat
                 rows.append(row)
+                generation_requests_without_usage += getattr(model, "requests_without_usage", 0)
     return {
         "schema_version": SCHEMA_VERSION,
         "commit": commit,
@@ -152,6 +179,9 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False, commit=No
             "model_context_max_bytes": settings.model_context_max_bytes,
             "model_token_budget": settings.model_token_budget,
             "model_max_output_tokens": settings.model_max_output_tokens,
+            "provider_timeout_seconds": settings.provider_timeout_seconds,
+            "provider_retry_attempts": settings.provider_retry_attempts,
+            "max_estimated_usd": max_estimated_usd,
             "tool_output_max_bytes": settings.tool_output_max_bytes,
             "as_of": AS_OF,
             "model_digest": digest(settings.openai_model) if live else None,
@@ -160,6 +190,8 @@ async def evaluate(cases, repeats=1, live=False, allow_external=False, commit=No
         "setup_ms": round(setup_ms, 3),
         "embedding_calls": (1 + store.embedding_calls) if live else 0,
         "estimate": estimate(len(cases), repeats, settings.agent_max_steps) if live else None,
+        "cost": measured_cost(rows, store, generation_requests_without_usage) if live else None,
+        "fixed_history_cases": [case.id for case in cases if case.history],
         "rows": rows,
         "summary": aggregate(rows),
     }
@@ -176,6 +208,12 @@ def main(argv=None):
     parser.add_argument("--estimate", action="store_true", help="no network or model construction")
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--golden", type=Path, default=HERE / "golden.jsonl")
+    parser.add_argument("--extra-golden", type=Path, action="append", default=[])
+    parser.add_argument("--case", action="append", default=[], help="select case ID (repeatable)")
+    parser.add_argument(
+        "--max-estimated-usd", type=float,
+        help="required live preflight ceiling; not a provider billing cap",
+    )
     parser.add_argument("--output", type=Path, default=HERE / "results" / "latest.json")
     parser.add_argument("--baseline", type=Path)
     parser.add_argument(
@@ -186,8 +224,18 @@ def main(argv=None):
         parser.error("--repeats must be positive")
     if args.live and not args.allow_external and not args.estimate:
         parser.error("live evaluation requires --live --allow-external")
+    if args.live and not args.estimate and args.max_estimated_usd is None:
+        parser.error("live evaluation requires --max-estimated-usd")
     try:
         cases = load_cases(args.golden)
+        for extra in args.extra_golden:
+            cases.extend(load_cases(extra))
+        if len({case.id for case in cases}) != len(cases):
+            raise ValueError("duplicate case ids")
+        if args.case:
+            if not set(args.case) <= {case.id for case in cases}:
+                raise ValueError("unknown case id")
+            cases = [case for case in cases if case.id in args.case]
         if args.estimate:
             print(
                 json.dumps(estimate(len(cases), args.repeats, settings.agent_max_steps), indent=2)
@@ -214,6 +262,7 @@ def main(argv=None):
                 raise ValueError("incompatible baseline cases")
         report = asyncio.run(evaluate(
             cases, args.repeats, args.live, args.allow_external, args.commit,
+            args.max_estimated_usd,
         ))
         if baseline:
             report["comparison"] = compare(baseline, report)

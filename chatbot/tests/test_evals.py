@@ -312,7 +312,9 @@ async def test_live_runner_can_be_exercised_without_external_api(monkeypatch):
 
     monkeypatch.setattr(live, "prepare_store", prepare)
     monkeypatch.setattr(live, "build_model", lambda tools: ScriptedLLM("ship-01"))
-    report = await evaluate(CASES[:1], repeats=2, live=True, allow_external=True)
+    report = await evaluate(
+        CASES[:1], repeats=2, live=True, allow_external=True, max_estimated_usd=0.30
+    )
     assert report["mode"] == "live-synthetic"
     assert report["embedding_calls"] == 3
     assert all(row["passed"] for row in report["rows"])
