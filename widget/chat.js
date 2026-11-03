@@ -4,14 +4,15 @@
  * Incorporabile con un solo tag, senza build step:
  *   <script src="/widget/chat.js" data-api="http://localhost:8000"></script>
  *
- * Il token di sessione vive solo in memoria e viaggia nell'header Authorization.
- * Il customer ID non è mai noto al client: lo risolve il backend dal token.
+ * In WordPress usa cookie e nonce nativi: il token backend resta nel proxy PHP.
+ * Solo la demo conserva il suo token in memoria, senza storage persistente.
  */
 (function () {
   "use strict";
 
   const script = document.currentScript;
   const API = (script && script.dataset.api) || window.WOO_RAG_API || "http://localhost:8000";
+  const WP_NONCE = script && script.dataset.wpNonce;
 
   const state = {
     open: false,
@@ -20,6 +21,8 @@
     customerLabel: null,
     conversationId: null,
     epoch: 0,
+    wpSessionKey: null,
+    wpAuthenticated: false,
   };
 
   const STYLES = `
@@ -81,13 +84,12 @@
   const guestBtn = el("button", null, "Continua come ospite");
   const custABtn = el("button", null, "Accedi come Mario");
   const custBBtn = el("button", null, "Accedi come Luigi");
-  auth.append(guestBtn, custABtn, custBBtn);
+  const accountLink = el("a", null, "Accedi al negozio");
+  const logoutLink = el("a", null, "Esci dal negozio");
+  auth.append(guestBtn, custABtn, custBBtn, accountLink, logoutLink);
+  accountLink.hidden = logoutLink.hidden = true;
   auth.hidden = true;
   auth.style.display = "none";
-  fetch(API + "/session/config").then(r => r.json()).then(config => {
-    auth.hidden = !config.demo_enabled;
-    auth.style.display = config.demo_enabled ? "flex" : "none";
-  }).catch(() => {});
 
   const log = el("div", "wrag-log");
 
@@ -152,7 +154,7 @@
   }
 
   function setSessionLabel() {
-    headNote.textContent = state.token
+    headNote.textContent = state.wpAuthenticated ? "Sessione: account WooCommerce" : state.token
       ? "Sessione: " + state.customerLabel
       : "Sessione: ospite";
     guestBtn.setAttribute("aria-pressed", String(!state.token));
@@ -165,6 +167,44 @@
     state.epoch += 1;
     log.replaceChildren();
     addMessage("bot", note);
+  }
+
+  async function loadConfig() {
+    const response = await fetch(API + "/session/config", {
+      credentials: "include",
+      headers: WP_NONCE ? { "X-WP-Nonce": WP_NONCE } : {},
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error("Sessione cambiata: ricarica la pagina e accedi di nuovo.");
+    const config = await response.json();
+    const wordpress = Boolean(WP_NONCE && config.wordpress);
+    auth.hidden = !(wordpress || config.demo_enabled);
+    auth.style.display = auth.hidden ? "none" : "flex";
+    [guestBtn, custABtn, custBBtn].forEach(button => { button.hidden = !config.demo_enabled; });
+    if (wordpress) {
+      const changed = state.wpSessionKey !== null && state.wpSessionKey !== config.session_key;
+      state.wpSessionKey = config.session_key;
+      state.wpAuthenticated = config.authenticated;
+      accountLink.hidden = config.authenticated;
+      logoutLink.hidden = !config.authenticated;
+      accountLink.href = config.login_url;
+      logoutLink.href = config.logout_url;
+      setSessionLabel();
+      if (changed) resetConversation("Sessione cambiata: la conversazione è stata azzerata.");
+      return changed;
+    }
+    return false;
+  }
+
+  function expiredSession(message) {
+    state.wpSessionKey = null;
+    state.wpAuthenticated = false;
+    if (WP_NONCE) {
+      accountLink.hidden = false;
+      logoutLink.hidden = true;
+    }
+    logout();
+    addMessage("error", message);
   }
 
   async function login(key, label) {
@@ -201,6 +241,17 @@
   }
 
   async function ask(message) {
+    const initialEpoch = state.epoch;
+    await configReady;
+    if (initialEpoch !== state.epoch) return;
+    if (WP_NONCE) {
+      try {
+        if (await loadConfig()) addMessage("user", message);
+      } catch (error) {
+        expiredSession(error.message);
+        return;
+      }
+    }
     const epoch = state.epoch;
     const typing = el("div", "wrag-typing", "sto cercando…");
     log.appendChild(typing);
@@ -208,6 +259,7 @@
 
     const headers = { "Content-Type": "application/json" };
     if (state.token) headers.Authorization = "Bearer " + state.token;
+    if (WP_NONCE) headers["X-WP-Nonce"] = WP_NONCE;
 
     try {
       const response = await fetch(API + "/chat", {
@@ -219,9 +271,8 @@
       typing.remove();
       if (epoch !== state.epoch) return;
 
-      if (response.status === 401) {
-        logout();
-        addMessage("error", "Sessione scaduta: accedi di nuovo.");
+      if ([401, 403].includes(response.status)) {
+        expiredSession("Sessione scaduta: ricarica la pagina e accedi di nuovo.");
         return;
       }
       if ([404, 409].includes(response.status)) {
@@ -236,6 +287,15 @@
       if (!response.ok) throw new Error("HTTP " + response.status);
 
       const data = await response.json();
+      // A login/logout in another tab also hides an answer that was already in flight.
+      if (WP_NONCE) {
+        try {
+          if (await loadConfig()) return;
+        } catch (error) {
+          expiredSession(error.message);
+          return;
+        }
+      }
       if (epoch !== state.epoch) return;
       state.conversationId = data.conversation_id;
       addMessage("bot", data.reply, data.sources);
@@ -278,4 +338,12 @@
 
   setSessionLabel();
   logout();
+  const configReady = loadConfig().catch(error => {
+    if (WP_NONCE) expiredSession(error.message);
+  });
+  if (WP_NONCE && window.addEventListener) {
+    ["focus", "pageshow"].forEach(event => window.addEventListener(event, () => {
+      loadConfig().catch(error => expiredSession(error.message));
+    }));
+  }
 })();

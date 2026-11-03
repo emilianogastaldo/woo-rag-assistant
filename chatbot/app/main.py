@@ -1,7 +1,7 @@
 """Backend FastAPI: orchestratore chat (RAG + tool calling).
 
 Flusso di una richiesta a `/chat`:
-  1. il token di sessione arriva nell'header `Authorization: Bearer ...`;
+  1. il proxy WordPress (o la demo locale) invia `Authorization: Bearer ...`;
   2. il backend lo verifica e risolve il customer ID server-side;
   3. in base alla sessione costruisce il toolset (i tool ordini esistono solo per
      un utente autenticato);
@@ -31,6 +31,7 @@ from app.agent import FALLBACK_REPLY, answer
 from app.auth.session import (
     DEMO_CUSTOMERS,
     SessionError,
+    conversation_identity,
     issue_token,
     resolve_session,
     verify_token,
@@ -243,13 +244,14 @@ async def chat(
             try:
                 token = _bearer(authorization)
                 session = await resolve_session(token, client=woo)
+                identity_key = conversation_identity(token) if session is not None else ""
             except SessionError as exc:
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
             except RecoverableFailure:
                 raise HTTPException(status_code=503, detail=FALLBACK_REPLY) from None
             guest_token = request.cookies.get("wrag_guest")
             if session is not None:
-                identity = f"{token}:{session.customer_id}".encode()
+                identity = f"{identity_key}:{session.customer_id}".encode()
                 owner = "auth:" + hashlib.sha256(identity).hexdigest()
             else:
                 try:

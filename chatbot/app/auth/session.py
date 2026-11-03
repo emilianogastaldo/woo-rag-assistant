@@ -4,6 +4,10 @@ Regola non negoziabile: il customer ID non arriva mai dal client e non è mai
 visibile al modello. Il client presenta solo un token firmato; il backend ne
 verifica la firma, ne estrae l'identità e risolve il customer ID su WooCommerce.
 
+In WordPress il proxy verifica cookie e nonce nativi a ogni turno, poi emette
+un'asserzione `wp.` di 30 secondi con un segreto separato. Il browser non la vede.
+L'ID WP firmato deve coincidere con il customer ID risolto via WooCommerce.
+
 Per la demo l'autenticazione è mockata: `POST /demo/login` emette un token per uno
 dei clienti creati dal seed. Il token è comunque firmato HMAC-SHA256 con
 `SESSION_SECRET`, quindi non è falsificabile lato client: cambia la provenienza
@@ -17,6 +21,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import time
 from collections import OrderedDict
@@ -51,8 +56,10 @@ def _b64decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def _signature(payload: bytes) -> str:
-    digest = hmac.new(settings.session_secret.encode(), payload, hashlib.sha256).digest()
+def _signature(payload: bytes, secret: str | None = None) -> str:
+    digest = hmac.new(
+        (settings.session_secret if secret is None else secret).encode(), payload, hashlib.sha256
+    ).digest()
     return _b64encode(digest)
 
 
@@ -67,17 +74,22 @@ def issue_token(email: str, ttl_seconds: int | None = None) -> str:
     return f"{_b64encode(payload)}.{_signature(payload)}"
 
 
-def verify_token(token: str) -> str:
-    """Verifica firma e scadenza, restituisce l'email. Solleva `SessionError`."""
+def _verified_payload(token: str) -> dict:
     if len(token) > 4096:
         raise SessionError("token malformato")
+    bridge = token.startswith("wp.")
+    if bridge:
+        if not settings.wrag_bridge_secret:
+            raise SessionError("ponte WordPress non configurato")
+        token = token[3:]
     try:
         payload_b64, signature = token.split(".", 1)
         payload = _b64decode(payload_b64)
     except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
         raise SessionError("token malformato") from exc
 
-    if not signature.isascii() or not hmac.compare_digest(_signature(payload), signature):
+    secret = settings.wrag_bridge_secret if bridge else settings.session_secret
+    if not signature.isascii() or not hmac.compare_digest(_signature(payload, secret), signature):
         raise SessionError("firma non valida")
     try:
         data = json.loads(payload)
@@ -89,7 +101,28 @@ def verify_token(token: str) -> str:
         raise SessionError("token malformato")
     if data["exp"] <= time.time():
         raise SessionError("sessione scaduta")
+    if bridge and (
+        data["exp"] > time.time() + 60
+        or not isinstance(data.get("sid"), str)
+        or not re.fullmatch(r"[a-f0-9]{64}", data["sid"])
+        or type(data.get("uid")) is not int
+        or data["uid"] <= 0
+    ):
+        raise SessionError("sessione WordPress non valida")
+    return data
+
+
+def verify_token(token: str) -> str:
+    """Verifica firma e scadenza, restituisce l'email. Solleva `SessionError`."""
+    data = _verified_payload(token)
     return data["sub"]
+
+
+def conversation_identity(token: str) -> str:
+    """WP renews its short assertion each turn; isolate by its signed login session."""
+    if token.startswith("wp."):
+        return "wp:" + _verified_payload(token)["sid"]
+    return token
 
 
 _customer_id_cache: OrderedDict[str, tuple[int, float]] = OrderedDict()
@@ -126,4 +159,6 @@ async def resolve_session(token: str | None, client: WooClient | None = None) ->
     customer_id = await resolve_customer_id(email, client)
     if customer_id is None:
         raise SessionError("cliente non trovato")
+    if token.startswith("wp.") and _verified_payload(token)["uid"] != customer_id:
+        raise SessionError("identità cliente non valida")
     return Session(email=email, customer_id=customer_id)
