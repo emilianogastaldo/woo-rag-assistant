@@ -26,6 +26,13 @@ L’email non specifica durata della presentazione, modalità di invio del link 
 accessi necessari a una repository privata: sono aspetti da confermare con i docenti.
 Non richiede un deployment pubblico né strumenti per generare/eseguire codice.
 
+## Provare il progetto
+
+Docenti e assistenti AI possono partire dall’[avvio guidato nel README](../README.md#avvio):
+prerequisiti, configurazione locale, seed, indicizzazione, account demo e verifiche.
+La demo interattiva richiede una propria chiave OpenAI con credito; i
+[test offline](../README.md#sviluppo) non usano chiavi né chiamano il provider.
+
 ## Come il progetto dimostra le competenze
 
 | Competenza | Evidenza nel repository |

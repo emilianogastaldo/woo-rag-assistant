@@ -18,6 +18,8 @@ Il chatbot si incorpora in un negozio WooCommerce e:
 3. instrada da solo tra RAG, tool o entrambi — per esempio «posso ancora restituire
    l'ordine 21?» richiede il tool (data di consegna) *e* il RAG (policy di reso).
 
+Per provare il progetto da un clone: [avvio guidato per docenti e assistenti AI](#avvio).
+
 ## Architettura
 
 ```
@@ -118,21 +120,139 @@ non si conferma nemmeno che quell'ordine esista.
 
 ## Avvio
 
+### Prerequisiti
+
+- Git, Docker Engine/Docker Desktop **avviato** e Docker Compose v2 o successivo
+  (`docker compose version`). Su Windows eseguire i comandi in **WSL2/Bash**;
+  su Linux/macOS usare un terminale Bash compatibile.
+- Connessione Internet per scaricare immagini Docker, dipendenze e WooCommerce.
+- Una propria chiave API OpenAI con credito disponibile e accesso ai modelli
+  configurati. Ingestion e chat fanno chiamate fatturate dal provider.
+  Senza chiave è possibile eseguire i [test offline](#sviluppo), ma non provare
+  le risposte del chatbot reale. La chiave LlamaCloud non serve per questa demo.
+- Porte 8080, 8000 e 8001 libere. La procedura è per un **nuovo ambiente locale**:
+  non eseguirla sul database di un negozio reale o su una demo da conservare.
+
+Il Compose distribuito pubblica le porte sulle interfacce dell'host: usarlo su
+una macchina/rete fidata, senza esposizione Internet. Le password di WordPress,
+MariaDB e dei clienti sono pubbliche perché i dati sono sintetici. Il file di
+override privato dell'autore non è necessario e non è incluso nel repository.
+
+### 1. Clonare e configurare
+
 ```bash
-cp .env.example .env                      # e valorizza le variabili
-docker compose up -d db wordpress chromadb # bootstrap servizi, prima del seed
-docker compose run --rm wpcli /seed/setup.sh   # installa WP/Woo e i dati demo
-docker compose build chatbot-api ingest
-docker compose run --rm ingest            # solo dopo autorizzazione al provider/corpus
-docker compose up -d --wait chatbot-api    # attende WordPress/Woo, Chroma e KB pronta
+git clone https://github.com/emilianogastaldo/woo-rag-assistant.git
+cd woo-rag-assistant
+cp .env.example .env
 ```
 
-Il seed stampa le chiavi API read-only alla prima esecuzione (`__WC_KEYS__ <ck> <cs>`):
-vanno copiate in `.env` come `WC_CONSUMER_KEY` / `WC_CONSUMER_SECRET`.
+Se `.env` esiste già, modificarlo senza sovrascriverlo. Aprirlo in un editor e
+configurare questi valori **prima di avviare i container**:
 
-- Negozio WordPress: <http://localhost:8080>
-- API del chatbot: <http://localhost:8000/docs>
-- Pagina di demo del widget: <http://localhost:8000/widget/>
+| Variabile | Valore per questa demo |
+| --- | --- |
+| `OPENAI_API_KEY` | La propria chiave API, solo nel file locale `.env`. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1`; impostarlo esplicitamente, senza lasciarlo vuoto. |
+| `OPENAI_MODEL` | Lasciare `gpt-4.1-mini`. |
+| `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` | Lasciare `text-embedding-3-small` / `1536`. |
+| `SESSION_SECRET` | Un segreto casuale di almeno 32 caratteri. |
+| `WRAG_BRIDGE_SECRET` | Un secondo segreto casuale, diverso dal primo, di almeno 32 caratteri; abilita la chat in WordPress. |
+| `APP_ENV` / `DEMO_ENABLED` | Lasciare `development` / `false`: il negozio usa il login WordPress reale. |
+| `WC_CONSUMER_KEY` / `WC_CONSUMER_SECRET` | Lasciare vuoti fino al passo 2. |
+
+Per generare ciascun segreto, se Python 3 è disponibile, eseguire due volte
+`python3 -c 'import secrets; print(secrets.token_urlsafe(48))'` e copiare i risultati
+nei rispettivi campi. Non condividere `.env`, i segreti o l'output con le chiavi
+in commit, issue, report o conversazioni con un LLM.
+
+### 2. Creare il negozio e caricare il seed
+
+```bash
+docker compose up -d db wordpress chromadb
+docker compose run --rm wpcli /seed/setup.sh
+```
+
+WordPress può risultare `unhealthy` **prima del seed**: il controllo attende anche
+WooCommerce. Per questo il primo comando non usa `--wait`.
+
+Il seed installa WordPress/WooCommerce e crea sei prodotti, tre pagine informative,
+due clienti e tre ordini. Annotare gli ID degli ordini stampati, che possono variare.
+Alla prima esecuzione stampa anche `__WC_KEYS__ <ck> <cs>`: copiare i due valori in
+`.env` come `WC_CONSUMER_KEY` e `WC_CONSUMER_SECRET` **prima di proseguire**. Le chiavi
+hanno permessi di sola lettura. Una riesecuzione non ristampa il segreto esistente:
+se perso, generare una nuova chiave read-only dal pannello WooCommerce e aggiornare
+`.env`, senza cancellare il database.
+
+### 3. Indicizzare e avviare il chatbot
+
+Questo passaggio invia al provider i testi sintetici di prodotti e policy per gli
+embedding. Le successive domande in chat usano il modello configurato. Chi esegue
+la procedura deve essere autorizzato a usare la chiave e sostenere questi costi.
+
+```bash
+docker compose build chatbot-api ingest
+docker compose run --rm ingest
+docker compose up -d --wait chatbot-api
+```
+
+Proseguire all'ultimo comando soltanto se l'ingestion termina senza errori. Il corpus
+standard comprende sei prodotti e tre pagine; la homepage non viene indicizzata.
+
+### 4. Verificare e provare
+
+```bash
+docker compose ps
+curl --fail http://localhost:8000/health
+curl --fail http://localhost:8000/ready
+```
+
+Gli endpoint devono restituire rispettivamente `{"status":"ok"}` e
+`{"status":"ready"}`. Il primo prova che il backend risponde; il secondo verifica
+WooCommerce e l'indice, senza chiamare OpenAI. Per verificare anche il provider,
+aprire il negozio e chiedere «Quanto costa la spedizione standard?»: attendersi una
+risposta con fonte consultabile, non un messaggio di indisponibilità.
+
+- **Demo principale:** <http://localhost:8080>, con pulsante chat nel negozio.
+- **Account cliente:** pulsante Account, `mario.rossi` / `demo_secret_a` oppure
+  `luigi.verdi` / `demo_secret_b`. Provare gli ordini usando gli ID del proprio seed.
+- **Amministrazione:** <http://localhost:8080/wp-admin/>, `admin` / `admin_secret`.
+- **API:** <http://localhost:8000/docs>.
+- **Widget autonomo opzionale:** <http://localhost:8000/widget/>; il login mock
+  richiede il toggle descritto nella sezione [Demo](#demo), non necessario in WordPress.
+
+### Arresto, ripresa e problemi comuni
+
+`docker compose stop` ferma la demo conservando i dati; `docker compose start`
+riavvia i container già creati. Non occorre ripetere seed e ingestion a ogni avvio.
+Dopo modifiche alla configurazione del backend usare `docker compose up -d chatbot-api`;
+se cambia il segreto del ponte, ricreare anche WordPress con
+`docker compose up -d wordpress chatbot-api`.
+**Non usare `docker compose down -v` per un normale arresto:** elimina i volumi.
+
+| Sintomo | Controllo / azione |
+| --- | --- |
+| Docker non raggiungibile | Avviare Docker Desktop/Engine e verificare `docker info`. |
+| Porta già occupata | Fermare il servizio in conflitto. Cambiare solo la porta di WordPress non basta: URL del sito e firma OAuth devono restare coerenti. |
+| Widget assente nel negozio | Configurare `WRAG_BRIDGE_SECRET`, ricreare WordPress e backend, ricaricare la pagina. |
+| Errore WooCommerce 401 durante ingestion | Controllare le due chiavi read-only e `WC_SIGN_URL=http://localhost:8080/wp-json/wc/v3`. |
+| URL provider senza protocollo | Impostare `OPENAI_BASE_URL=https://api.openai.com/v1`, quindi rieseguire il servizio interessato. |
+| OpenAI 401 / 429 con `insufficient_quota` o `credit_balance_exhausted` | Correggere la chiave o il credito del relativo progetto OpenAI; non insistere con retry. Poi ripetere l'ingestion se non era riuscita. |
+| `/health` risponde ma `/ready` restituisce 503 | Verificare seed, chiavi Woo e successo dell'ingestion. Consultare `docker compose logs --tail=80 chatbot-api` senza pubblicare credenziali. |
+
+### Istruzioni da dare a un assistente AI
+
+Un assistente con accesso al terminale può seguire questo incarico; un LLM senza
+strumenti può soltanto spiegare i passaggi:
+
+> Leggi il README di woo-rag-assistant e segui la sezione Avvio in un ambiente
+> locale nuovo. Verifica prima Docker, porte e presenza di un'installazione
+> precedente: non sovrascrivere `.env` o volumi esistenti. Chiedimi di inserire
+> la mia chiave nel file locale senza incollarla in chat. Configura due segreti
+> distinti, esegui il seed e trasferisci le chiavi Woo in `.env` senza mostrarle.
+> Prima delle chiamate al provider verifica che ne abbia autorizzato l'uso.
+> Controlla `/health`, `/ready` e gli scenari della sezione Demo con gli ID
+> effettivi del seed. Non avviare benchmark live estesi e non cancellare volumi.
+> Riporta cosa è stato verificato e gli eventuali blocchi, senza segreti.
 
 Il setup applica anche **Trama**, child theme del tema WordPress Twenty Twenty-Five:
 homepage, navigazione, policy formattate e sei immagini locali con categorie.
@@ -166,7 +286,7 @@ appartiene invece alla pagina autonoma `/widget/`.
 
 ## Demo
 
-La demo richiede `DEMO_ENABLED=true` in ambiente `development` (default: disabilitata).
+La demo del **widget autonomo** richiede `DEMO_ENABLED=true` in ambiente `development` (default: disabilitata).
 L'autenticazione della demo è mockata: il widget offre «Continua come ospite» oppure
 l'accesso come cliente demo. `POST /demo/login` emette un token firmato HMAC per uno
 dei clienti creati dal seed — cambia la *provenienza* dell'identità, non il modo in
