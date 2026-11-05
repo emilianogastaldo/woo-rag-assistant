@@ -1,0 +1,30 @@
+{
+  "version": 3,
+  "settings": {
+    "layout": { "contentSize": "760px", "wideSize": "1180px" },
+    "color": {
+      "palette": [
+        { "slug": "base", "color": "#f6f3ec", "name": "Carta" },
+        { "slug": "contrast", "color": "#182922", "name": "Inchiostro" },
+        { "slug": "accent-1", "color": "#315c49", "name": "Bosco" },
+        { "slug": "accent-2", "color": "#e4eadd", "name": "Salvia" },
+        { "slug": "accent-3", "color": "#ad593f", "name": "Terracotta" }
+      ]
+    },
+    "typography": {
+      "fontFamilies": [
+        { "slug": "manrope", "name": "Sistema", "fontFamily": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" },
+        { "slug": "serif", "name": "Editoriale", "fontFamily": "Georgia, 'Times New Roman', serif" }
+      ]
+    }
+  },
+  "styles": {
+    "color": { "background": "var:preset|color|base", "text": "var:preset|color|contrast" },
+    "typography": { "fontFamily": "var:preset|font-family|manrope", "fontSize": "1rem", "fontWeight": "400", "lineHeight": "1.7" },
+    "elements": {
+      "heading": { "typography": { "fontFamily": "var:preset|font-family|serif", "fontWeight": "400", "lineHeight": "1.15" } },
+      "link": { "color": { "text": "var:preset|color|accent-1" } },
+      "button": { "color": { "background": "var:preset|color|accent-1", "text": "#ffffff" } }
+    }
+  }
+}

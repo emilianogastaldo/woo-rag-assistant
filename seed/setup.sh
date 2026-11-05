@@ -59,4 +59,8 @@ wp option update woocommerce_onboarding_profile '{"completed":true}' --format=js
 log "Seed dati demo"
 wp eval-file /seed/seed.php
 
+# --- 6. Tema e homepage (applicati una volta; conserva personalizzazioni) ---
+log "Storefront Trama"
+wp eval-file /seed/storefront.php
+
 log "Fatto."

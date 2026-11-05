@@ -1,8 +1,13 @@
 # Traccia per la presentazione — woo-rag-assistant
 
-Bozza aggiornata al 1 ottobre 2026. Riferimento applicativo: commit `15b617a`.
-Da aggiornare con l'evoluzione del progetto; durata e formato della presentazione
-non sono ancora definiti. La scaletta propone circa 10 minuti, demo compresa.
+Traccia per la presentazione **facoltativa del 19/12**. La consegna obbligatoria
+è il codice su GitHub entro la mezzanotte del **18/12**: vedere le
+[indicazioni Boolean e la checklist](consegna.md).
+
+Riferimento applicativo: baseline `02c3907`, con allestimento del 4 novembre 2026
+nel branch `feat/wordpress-demo-20-25` (verifiche eseguite prima del commit).
+Durata e formato non sono specificati nell’email: la scaletta propone circa
+10 minuti, demo compresa, da concordare se si sceglie di presentare.
 
 ## 1. Il problema e l'obiettivo (1 minuto)
 
@@ -149,6 +154,27 @@ potrebbe dare correttamente una risposta diversa fra qualche mese. Configurare l
 demo di login solo nell'ambiente di sviluppo. Fare riferimento ai comandi di
 [avvio e demo nel README](../README.md#avvio).
 
+Allestimento del 4 novembre 2026: il setup attiva **Trama**, con homepage,
+catalogo illustrato, categorie e policy leggibili. Il widget si carica dal ponte
+WordPress quando è configurato `WRAG_BRIDGE_SECRET`; per la demo nel negozio
+accedere dall'Account nativo come Mario o Luigi. Il toggle demo appartiene alla
+pagina autonoma del widget. Il README riporta comandi e credenziali solo sintetiche.
+
+Per il passo resi, preparare esplicitamente la fixture con:
+
+```bash
+docker compose run --rm wpcli wp eval-file /seed/demo-returns.php 2026-12-18
+```
+
+Annotare l'ID stampato: consegna **19 novembre**, scadenza **19 dicembre 2026**.
+Il 18 è entro termine, il 19 è il confine incluso, il 20 è oltre termine;
+l'ordine storico di Mario consegnato il 22 giugno è già scaduto dal 22 luglio.
+L'altro ordine di Mario senza tracking deve produrre un'astensione sulla scadenza.
+Gli ID dipendono dal database; [domande con gli ID della prova](issue-24-results.md).
+Una domanda con data futura esplicita è una simulazione: il backend usa il clock
+reale e la fixture non cambia data alle riesecuzioni. Per una data diversa
+preparare un ambiente isolato nuovo, senza riscrivere le date della demo esistente.
+
 Preparare una registrazione o schermate di una prova riuscita come supporto alla
 demo, indicando data e versione. Una prova con provider vero richiede autorizzazione
 per dati e costi; non è stata eseguita durante la preparazione di questa traccia.
@@ -161,6 +187,7 @@ per dati e costi; non è stata eseguita durante la preparazione di questa tracci
 | [Report issue 7](issue-7-results.md), versione precedente `18ff205` | Documenta 226 test e prove Docker isolate su ingestion e deployment. Sono risultati storici, non una nuova esecuzione sull'ultima versione. |
 | [Report issue 16](issue-16-results.md), verifica Docker del 3 novembre 2026 | Riavvio e ricreazione conservano history, limiti e scadenza; isolamento delle sessioni e cleanup verificati con provider sintetici. |
 | Golden dataset: 30 casi, con runner e confronto baseline | Esiste una procedura per confrontare routing, fonti, risposte e regressioni. I risultati con modello simulato verificano il software, non l'accuratezza di un LLM reale. |
+| [Verifica finale WordPress #25](issue-25-results.md), 4 novembre 2026 | 254 test Python offline e lint passati. Il report distingue setup/ingestion reali, provider sintetici, prove browser e limiti; contiene la procedura da un clone. |
 
 I 62 test sono una selezione mirata, non si sommano ai 226 del report precedente.
 La persistenza è ora verificata anche con riavvio e ricreazione reali dei container
@@ -207,15 +234,17 @@ a ogni lezione o aggiungere agenti, servizi e dipendenze senza un'esigenza misur
   metadati operativi, SQLite gli scambi completati e gli eval contatori opzionali.
   Non conservo automaticamente tutti i prompt e i risultati dei tool.
 - **È pronto per la produzione?** È un project work con controlli e prove
-  riproducibili; autenticazione reale, valutazione live e requisiti operativi del
-  negozio restano passaggi da completare.
+  riproducibili e login reale verificato in ambiente isolato. Valutazione live e
+  configurazione/verifica del deployment pubblico restano da completare; non sono
+  requisiti di produzione imposti dalla consegna Boolean.
 
 ## Come tenere aggiornata la traccia
 
 Dopo una modifica importante annotare: problema iniziale, decisione, commit,
-verifica eseguita, risultato e limite residuo. Prima dell'esame concordare durata
-e criteri richiesti, scegliere pochi esempi solidi e trasformare questa bozza
-nelle slide definitive.
+verifica eseguita, risultato e limite residuo. Prima della consegna verificare
+la checklist e l’accesso GitHub dei docenti. Se si partecipa alla presentazione,
+concordare durata e formato, scegliere pochi esempi solidi e trasformare questa
+bozza nelle slide definitive.
 
 Approfondimenti: [README](../README.md), [decisioni architetturali](architecture.md),
 [valutazione](../evals/README.md), [ingestion e deployment](ingestion-deployment.md).
