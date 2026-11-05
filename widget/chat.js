@@ -26,36 +26,51 @@
   };
 
   const STYLES = `
-  .wrag-launcher{position:fixed;right:24px;bottom:24px;z-index:9998;width:56px;height:56px;
-    border:0;border-radius:50%;background:#7f54b3;color:#fff;font-size:24px;cursor:pointer;
-    box-shadow:0 6px 20px rgba(0,0,0,.25)}
-  .wrag-launcher:hover{background:#6b4599}
-  .wrag-panel{position:fixed;right:24px;bottom:92px;z-index:9999;display:none;flex-direction:column;
-    width:380px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 140px);
-    background:#fff;border-radius:14px;overflow:hidden;font:14px/1.5 system-ui,sans-serif;
-    color:#1e1e1e;box-shadow:0 12px 40px rgba(0,0,0,.28)}
+  .wrag-launcher,.wrag-panel,.wrag-panel *{box-sizing:border-box}
+  .wrag-launcher{position:fixed;right:24px;bottom:calc(20px + env(safe-area-inset-bottom,0px));
+    z-index:9998;min-width:88px;min-height:48px;padding:12px 20px;border:1px solid #315C49;
+    border-radius:28px;background:#315C49;color:#fff;font:600 15px/1.5 system-ui,sans-serif;
+    cursor:pointer;box-shadow:0 6px 24px #18292230}
+  .wrag-launcher:hover,.wrag-form button:hover{background:#182922;color:#fff}
+  .wrag-panel{position:fixed;right:24px;bottom:calc(84px + env(safe-area-inset-bottom,0px));
+    z-index:9999;display:none;flex-direction:column;width:400px;max-width:calc(100vw - 24px);
+    height:560px;max-height:calc(100vh - 108px);max-height:calc(100dvh - 108px - env(safe-area-inset-bottom,0px));
+    background:#F6F3EC;border:1px solid #315C49;border-radius:16px;overflow:hidden;
+    font:14px/1.5 system-ui,sans-serif;color:#182922;box-shadow:0 12px 40px #18292230}
   .wrag-panel[data-open="true"]{display:flex}
-  .wrag-head{padding:14px 16px;background:#7f54b3;color:#fff}
-  .wrag-head strong{display:block;font-size:15px}
-  .wrag-head span{font-size:12px;opacity:.85}
-  .wrag-auth{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid #eee;background:#faf9fc}
-  .wrag-auth button{flex:1;padding:6px 8px;font-size:12px;cursor:pointer;border:1px solid #d8d1e6;
-    border-radius:6px;background:#fff;color:#4a4a4a}
-  .wrag-auth button[aria-pressed="true"]{background:#7f54b3;border-color:#7f54b3;color:#fff}
-  .wrag-log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
-  .wrag-msg{max-width:85%;padding:9px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}
-  .wrag-msg.user{align-self:flex-end;background:#7f54b3;color:#fff;border-bottom-right-radius:4px}
-  .wrag-msg.bot{align-self:flex-start;background:#f1f0f5;border-bottom-left-radius:4px}
-  .wrag-msg.bot a{color:#7f54b3}
-  .wrag-msg.error{align-self:stretch;background:#fdecea;color:#8b1a10;font-size:13px}
-  .wrag-sources{align-self:flex-start;max-width:85%;font-size:12px;color:#666}
-  .wrag-sources a{color:#7f54b3}
-  .wrag-form{display:flex;gap:8px;padding:12px;border-top:1px solid #eee}
-  .wrag-form input{flex:1;padding:9px 11px;border:1px solid #ddd;border-radius:8px;font-size:14px}
-  .wrag-form button{padding:9px 14px;border:0;border-radius:8px;background:#7f54b3;color:#fff;
-    cursor:pointer}
-  .wrag-form button:disabled{opacity:.5;cursor:default}
-  .wrag-typing{align-self:flex-start;font-size:12px;color:#888}
+  .wrag-head{position:relative;padding:14px 64px 14px 16px;background:#182922;color:#F6F3EC}
+  .wrag-head strong{display:block;font-size:16px}
+  .wrag-head span{font-size:12px}
+  .wrag-panel button,.wrag-panel input{font:inherit;margin:0}
+  .wrag-close{position:absolute;right:10px;top:10px;width:44px;height:44px;padding:0;
+    border:1px solid #F6F3EC80;border-radius:8px;background:transparent;color:#F6F3EC;
+    font-size:24px!important;cursor:pointer}
+  .wrag-auth{display:flex;flex-wrap:wrap;gap:8px;padding:8px 12px;border-bottom:1px solid #d4d9cd}
+  .wrag-auth button,.wrag-auth a{min-height:44px;padding:10px 8px;font-size:12px;color:#315C49}
+  .wrag-auth button{flex:1;cursor:pointer;border:1px solid #315C49;border-radius:6px;background:#fff}
+  .wrag-auth button[aria-pressed="true"]{background:#315C49;color:#fff}
+  .wrag-panel [hidden]{display:none!important}
+  .wrag-log{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:16px;
+    display:flex;flex-direction:column;gap:10px}
+  .wrag-msg{flex-shrink:0;max-width:90%;padding:10px 12px;border-radius:12px;
+    white-space:pre-wrap;overflow-wrap:anywhere}
+  .wrag-msg.user{align-self:flex-end;background:#315C49;color:#fff;border-bottom-right-radius:4px}
+  .wrag-msg.bot{align-self:flex-start;background:#fff;border:1px solid #d4d9cd;border-bottom-left-radius:4px}
+  .wrag-msg.error{align-self:stretch;background:#fff0e9;color:#853e29;border:1px solid #AD593F;font-size:13px}
+  .wrag-sources{flex-shrink:0;align-self:flex-start;max-width:100%;font-size:12px;overflow-wrap:anywhere}
+  .wrag-panel a{color:#315C49;text-decoration:underline;text-underline-offset:3px}
+  .wrag-msg a{font-weight:600}
+  .wrag-status{margin:0;padding:0 16px;font-size:12px;color:#315C49;min-height:24px}
+  .wrag-form{display:flex;gap:8px;padding:12px;border-top:1px solid #d4d9cd;background:#fff}
+  .wrag-form input{flex:1;min-width:0;min-height:44px;padding:10px;border:1px solid #315C49;
+    border-radius:8px;background:#fff;color:#182922;font-size:16px}
+  .wrag-form input::placeholder{color:#526358;opacity:1}
+  .wrag-form button{min-height:44px;padding:10px 14px;border:1px solid #315C49;border-radius:8px;
+    background:#315C49;color:#fff;cursor:pointer}
+  .wrag-form button:disabled{background:#526358;cursor:wait}
+  .wrag-launcher:focus-visible,.wrag-panel :focus-visible{outline:3px solid #AD593F;outline-offset:3px}
+  .wrag-head button:focus-visible{outline-color:#F6F3EC;outline-offset:2px}
+  @media(max-width:480px){.wrag-launcher,.wrag-panel{right:12px}.wrag-panel{width:calc(100vw - 24px)}}
   `;
 
   function el(tag, className, text) {
@@ -69,16 +84,28 @@
   style.textContent = STYLES;
   document.head.appendChild(style);
 
-  const launcher = el("button", "wrag-launcher", "💬");
+  const launcher = el("button", "wrag-launcher", "Chat");
+  launcher.type = "button";
   launcher.setAttribute("aria-label", "Apri la chat di assistenza");
+  launcher.setAttribute("aria-expanded", "false");
+  launcher.setAttribute("aria-controls", "wrag-panel");
 
   const panel = el("div", "wrag-panel");
+  panel.id = "wrag-panel";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-labelledby", "wrag-title");
   panel.dataset.open = "false";
 
   const head = el("div", "wrag-head");
-  head.appendChild(el("strong", null, "Assistenza negozio"));
+  const title = el("strong", null, "Assistente del negozio");
+  title.id = "wrag-title";
+  head.appendChild(title);
   const headNote = el("span", null, "Sessione: ospite");
   head.appendChild(headNote);
+  const close = el("button", "wrag-close", "×");
+  close.type = "button";
+  close.setAttribute("aria-label", "Chiudi la chat di assistenza");
+  head.appendChild(close);
 
   const auth = el("div", "wrag-auth");
   const guestBtn = el("button", null, "Continua come ospite");
@@ -92,17 +119,25 @@
   auth.style.display = "none";
 
   const log = el("div", "wrag-log");
+  log.setAttribute("role", "log");
+  log.setAttribute("aria-label", "Messaggi della chat");
+  log.setAttribute("aria-live", "polite");
+  log.setAttribute("aria-relevant", "additions");
+  log.tabIndex = 0;
+  const status = el("p", "wrag-status", "");
+  status.setAttribute("role", "status");
 
   const form = el("form", "wrag-form");
   const input = el("input");
   input.type = "text";
   input.placeholder = "Scrivi la tua domanda…";
   input.autocomplete = "off";
+  input.setAttribute("aria-label", "La tua domanda al negozio");
   const send = el("button", null, "Invia");
   send.type = "submit";
   form.append(input, send);
 
-  panel.append(head, auth, log, form);
+  panel.append(head, auth, log, status, form);
   document.body.append(launcher, panel);
 
   function scrollDown() {
@@ -119,6 +154,7 @@
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.title = source.title;
+    link.setAttribute("aria-label", source.title + " (si apre in una nuova scheda)");
     return link;
   }
 
@@ -253,10 +289,6 @@
       }
     }
     const epoch = state.epoch;
-    const typing = el("div", "wrag-typing", "sto cercando…");
-    log.appendChild(typing);
-    scrollDown();
-
     const headers = { "Content-Type": "application/json" };
     if (state.token) headers.Authorization = "Bearer " + state.token;
     if (WP_NONCE) headers["X-WP-Nonce"] = WP_NONCE;
@@ -268,7 +300,6 @@
         credentials: "include",
         body: JSON.stringify({ message: message, conversation_id: state.conversationId }),
       });
-      typing.remove();
       if (epoch !== state.epoch) return;
 
       if ([401, 403].includes(response.status)) {
@@ -301,16 +332,27 @@
       addMessage("bot", data.reply, data.sources);
       addSources(data.sources);
     } catch (error) {
-      typing.remove();
       if (epoch !== state.epoch) return;
-      addMessage("error", "Non riesco a contattare l'assistente (" + error.message + ").");
+      addMessage("error", "L'assistente non è disponibile. Riprova tra poco.");
     }
   }
 
-  launcher.addEventListener("click", function () {
-    state.open = !state.open;
+  function setOpen(open) {
+    state.open = open;
     panel.dataset.open = String(state.open);
+    launcher.setAttribute("aria-expanded", String(state.open));
+    launcher.setAttribute("aria-label", state.open ? "Chiudi la chat di assistenza" : "Apri la chat di assistenza");
     if (state.open) input.focus();
+    else launcher.focus();
+  }
+
+  launcher.addEventListener("click", function () { setOpen(!state.open); });
+  close.addEventListener("click", function () { setOpen(false); });
+  panel.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+    }
   });
 
   guestBtn.addEventListener("click", logout);
@@ -328,12 +370,16 @@
 
     state.busy = true;
     send.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    status.textContent = "Sto cercando una risposta…";
     input.value = "";
     addMessage("user", message);
     await ask(message);
     state.busy = false;
     send.disabled = false;
-    input.focus();
+    form.setAttribute("aria-busy", "false");
+    status.textContent = "";
+    if (state.open && document.activeElement === send) input.focus();
   });
 
   setSessionLabel();

@@ -3,7 +3,10 @@
 Assistente clienti per e-commerce WooCommerce, basato su **RAG** e **tool calling**.
 Project work individuale per il Master AI Engineering (Boolean).
 
-Per preparare la presentazione: [traccia del progetto](docs/presentazione.md),
+Consegna del codice su GitHub entro la mezzanotte del **18/12**; presentazione
+facoltativa il **19/12**. [Indicazioni Boolean e checklist di consegna](docs/consegna.md).
+
+Per preparare la presentazione facoltativa: [traccia del progetto](docs/presentazione.md),
 con scaletta, demo, risultati verificati e prossimi miglioramenti.
 
 Il chatbot si incorpora in un negozio WooCommerce e:
@@ -131,6 +134,36 @@ vanno copiate in `.env` come `WC_CONSUMER_KEY` / `WC_CONSUMER_SECRET`.
 - API del chatbot: <http://localhost:8000/docs>
 - Pagina di demo del widget: <http://localhost:8000/widget/>
 
+Il setup applica anche **Trama**, child theme del tema WordPress Twenty Twenty-Five:
+homepage, navigazione, policy formattate e sei immagini locali con categorie.
+Tema e asset sono montati dal Compose, senza page builder o script incollati.
+Lo stesso comando di setup può essere ripetuto: mantiene ID, media, pagine e menu;
+come il seed originale, aggiorna prezzi, descrizioni e stock dei sei SKU demo.
+Conserva le categorie aggiunte dal negoziante e non riapplica impostazioni del tema
+già inizializzate. Provenienza e CC0 dei soli asset: [catalogo](seed/assets/README.md).
+
+Su un negozio già popolato, il solo allestimento del tema si applica con:
+
+```bash
+docker compose run --rm wpcli wp eval-file /seed/storefront.php
+```
+
+Il comando conserva la configurazione già inizializzata e non aggiorna i prodotti.
+
+Per la chat dentro WordPress impostare in `.env` **`WRAG_BRIDGE_SECRET`** casuale
+di almeno 32 caratteri, distinto da `SESSION_SECRET`, quindi:
+
+```bash
+docker compose up -d --force-recreate wordpress chatbot-api
+```
+
+Il ponte usa `http://chatbot-api:8000` nella rete Docker e carica il widget nel
+footer. Il pulsante Account usa il login WordPress nativo: `mario.rossi` /
+`demo_secret_a`, oppure `luigi.verdi` / `demo_secret_b`. Sono credenziali pubbliche
+per dati sintetici locali; [configurazione e limiti del ponte](docs/issue-18-results.md).
+Il login del negozio funziona con `DEMO_ENABLED=false`; il toggle descritto sotto
+appartiene invece alla pagina autonoma `/widget/`.
+
 ## Demo
 
 La demo richiede `DEMO_ENABLED=true` in ambiente `development` (default: disabilitata).
@@ -156,6 +189,31 @@ l'assistenza.
 | 4 | Mario | ordine di Luigi | «ordine non trovato» |
 | 5 | Mario | «Posso ancora restituire l'ordine 21?» | tool + RAG; scadenza dai 30 giorni dalla consegna verificata |
 | 6 | qualsiasi | «Che tempo farà domani?» | fuori dominio, declina |
+
+Per preparare il **18/12/2026** (consegna del codice) la prova di reso per la
+presentazione del **19/12**, dopo il setup ordinario aggiungere una sola fixture:
+
+```bash
+docker compose run --rm wpcli wp eval-file /seed/demo-returns.php 2026-12-18
+```
+
+Usare l'ID stampato: consegna verificata **19/11/2026**, termine **19/12/2026**;
+il 18 è entro termine, il 19 è l'ultimo giorno, il 20 è fuori termine. Confrontare
+con l'ordine storico consegnato il 22/06 (termine 22/07) e quello senza tracking
+(astensione). La preparazione conserva gli storici; ripeterla con la stessa data
+non cambia ordini o date. Il backend usa il clock reale: una domanda datata
+esplicitamente prima della presentazione resta una simulazione.
+Per una prova valida in un'altra data usare un **nuovo ambiente isolato** e passare
+quella data; il comando rifiuta di spostare una fixture già preparata.
+ID d'esempio e domande: [scenari reso](docs/issue-24-results.md).
+
+La verifica finale ripetibile da un clone, con volumi propri e provider sintetici,
+è `python3 evals/run_issue19_import.py --demo-final`; prerequisiti, comandi di build,
+risultati e schermate sono nel [report finale](docs/issue-25-results.md).
+Anteprime Trama: [homepage desktop](docs/screenshots/trama-home-desktop.png),
+[mobile](docs/screenshots/trama-home-mobile.png),
+[catalogo](docs/screenshots/trama-catalog-desktop.png) e
+[chat mobile](docs/screenshots/trama-chat-mobile.png) con risposta simulata.
 
 ## Ingestion e deploy versionati
 

@@ -51,6 +51,7 @@ services:
       - wp_data:/var/www/html
       - ./wordpress/woo-rag-auth.php:/var/www/html/wp-content/mu-plugins/woo-rag-auth.php:ro
       - ./widget:/var/www/html/wp-content/woo-rag-widget:ro
+      - ./wordpress/trama:/var/www/html/wp-content/themes/trama:ro
     healthcheck:
       # Ready only after WordPress core and WooCommerce seed (HTTP + PHP + DB).
       test: ["CMD", "php", "-r", "exit((json_decode(@file_get_contents('http://127.0.0.1/wp-json/wp/v2/types/product'), true)['slug'] ?? '') === 'product' ? 0 : 1);"]
@@ -204,6 +205,7 @@ services:
     volumes:
       - wp_data:/var/www/html
       - ./seed:/seed
+      - ./wordpress/trama:/var/www/html/wp-content/themes/trama:ro
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_NAME: wordpress

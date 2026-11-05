@@ -1,0 +1,32 @@
+{
+  "TSHIRT-BIO": {
+    "file": "tshirt-bio.png",
+    "alt": "Illustrazione di una maglietta color sabbia a girocollo",
+    "category": "abbigliamento"
+  },
+  "HOODIE-CLASSIC": {
+    "file": "hoodie-classic.png",
+    "alt": "Illustrazione di una felpa verde con cappuccio e tasca a marsupio",
+    "category": "abbigliamento"
+  },
+  "SHOES-RUN-X": {
+    "file": "shoes-run-x.png",
+    "alt": "Illustrazione di una scarpa da running chiara con dettagli verdi e terracotta",
+    "category": "scarpe"
+  },
+  "BACKPACK-URBAN": {
+    "file": "backpack-urban.png",
+    "alt": "Illustrazione di uno zaino terracotta con tasca frontale e spallacci",
+    "category": "accessori"
+  },
+  "BOTTLE-THERMO": {
+    "file": "bottle-thermo.png",
+    "alt": "Illustrazione di una borraccia termica verde con tappo scuro",
+    "category": "accessori"
+  },
+  "CAP-SPORT": {
+    "file": "cap-sport.png",
+    "alt": "Illustrazione di un cappellino color sabbia con visiera verde",
+    "category": "abbigliamento"
+  }
+}

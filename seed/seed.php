@@ -15,6 +15,8 @@
  */
 
 if ( ! defined( 'ABSPATH' ) ) { exit( 1 ); }
+require_once __DIR__ . '/markdown.php';
+require_once __DIR__ . '/catalog.php';
 
 function wrag_log( $msg ) { WP_CLI::log( $msg ); }
 
@@ -25,6 +27,7 @@ wrag_log( '== Prodotti ==' );
 $csv_path = '/seed/products.csv';
 $lines    = array_map( 'str_getcsv', file( $csv_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES ) );
 $header   = array_shift( $lines );
+$assets   = json_decode( file_get_contents( __DIR__ . '/assets/products.json' ), true, 512, JSON_THROW_ON_ERROR );
 
 foreach ( $lines as $row ) {
 	$p        = array_combine( $header, $row );
@@ -41,6 +44,7 @@ foreach ( $lines as $row ) {
 	$product->set_stock_status( ( (int) $p['stock_quantity'] ) > 0 ? 'instock' : 'outofstock' );
 	$product->set_catalog_visibility( 'visible' );
 	$product->set_status( 'publish' );
+	wrag_seed_product_assets( $product, $assets[ $p['sku'] ] );
 	$product->save();
 
 	wrag_log( sprintf( '  %s %s (stock %d)', $existing ? '~' : '+', $p['sku'], (int) $p['stock_quantity'] ) );
@@ -56,7 +60,7 @@ $pages = array(
 	array( 'slug' => 'domande-frequenti', 'title' => 'Domande Frequenti',    'file' => '/seed/docs/faq.md' ),
 );
 foreach ( $pages as $pg ) {
-	$content  = file_get_contents( $pg['file'] );
+	$content  = wrag_seed_markdown( file_get_contents( $pg['file'] ) );
 	$existing = get_page_by_path( $pg['slug'], OBJECT, 'page' );
 	$postarr  = array(
 		'post_title'   => $pg['title'],
@@ -160,7 +164,11 @@ if ( get_option( 'wrag_seed_orders_done' ) ) {
 		if ( ! empty( $s['delivery_date'] ) ) {
 			$order->update_meta_data( '_wrag_delivery_date', $s['delivery_date'] );
 		}
+		// Gli ordini sintetici non devono consumare lo stock definito dal CSV.
+		$skip_stock = static function () { return false; };
+		add_filter( 'woocommerce_can_reduce_order_stock', $skip_stock );
 		$order->save();
+		remove_filter( 'woocommerce_can_reduce_order_stock', $skip_stock );
 		wrag_log( sprintf( '  + ordine #%d cliente %s (%s)', $order->get_id(), $s['customer'], $s['status'] ) );
 	}
 	update_option( 'wrag_seed_orders_done', 1 );
