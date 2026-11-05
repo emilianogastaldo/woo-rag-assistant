@@ -1,7 +1,7 @@
 """Backend FastAPI: orchestratore chat (RAG + tool calling).
 
 Flusso di una richiesta a `/chat`:
-  1. il token di sessione arriva nell'header `Authorization: Bearer ...`;
+  1. il proxy WordPress (o la demo locale) invia `Authorization: Bearer ...`;
   2. il backend lo verifica e risolve il customer ID server-side;
   3. in base alla sessione costruisce il toolset (i tool ordini esistono solo per
      un utente autenticato);
@@ -31,12 +31,18 @@ from app.agent import FALLBACK_REPLY, answer
 from app.auth.session import (
     DEMO_CUSTOMERS,
     SessionError,
+    conversation_identity,
     issue_token,
     resolve_session,
     verify_token,
 )
 from app.config import settings
-from app.conversations import ConversationError, MemoryConversationStore, MemoryRateLimiter
+from app.conversations import (
+    ConversationError,
+    MemoryConversationStore,
+    MemoryRateLimiter,
+    SQLiteConversationStore,
+)
 from app.http_clients import provider_client_scope
 from app.observability import correlation, log_event
 from app.privacy import privacy_scope, redact
@@ -49,7 +55,7 @@ from app.tools.woo_client import WooClient, woo_client_scope
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings.validate_security()
-    application.state.conversations = MemoryConversationStore()
+    application.state.conversations = SQLiteConversationStore(settings.conversation_db_path)
     application.state.rate_limiter = MemoryRateLimiter()
     logging.getLogger("uvicorn.access").disabled = True
     operations = logging.getLogger("woo_rag.operations")
@@ -67,6 +73,7 @@ async def lifespan(application: FastAPI):
     try:
         yield
     finally:
+        application.state.conversations.close()
         await application.state.woo_client.aclose()
         await application.state.provider_http_client.aclose()
 
@@ -141,6 +148,11 @@ app.state.rate_limiter = MemoryRateLimiter()
 async def validation_error(request, exc):
     # FastAPI's default error includes the rejected (possibly sensitive) input.
     return JSONResponse(status_code=422, content={"detail": "Richiesta non valida"})
+
+
+@app.exception_handler(ConversationError)
+async def conversation_error(request, exc):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.detail})
 
 
 @app.middleware("http")
@@ -232,13 +244,14 @@ async def chat(
             try:
                 token = _bearer(authorization)
                 session = await resolve_session(token, client=woo)
+                identity_key = conversation_identity(token) if session is not None else ""
             except SessionError as exc:
                 raise HTTPException(status_code=401, detail=str(exc)) from exc
             except RecoverableFailure:
                 raise HTTPException(status_code=503, detail=FALLBACK_REPLY) from None
             guest_token = request.cookies.get("wrag_guest")
             if session is not None:
-                identity = f"{token}:{session.customer_id}".encode()
+                identity = f"{identity_key}:{session.customer_id}".encode()
                 owner = "auth:" + hashlib.sha256(identity).hexdigest()
             else:
                 try:
@@ -247,10 +260,7 @@ async def chat(
                 except SessionError:
                     guest_token = issue_token("guest:" + uuid.uuid4().hex)
                 owner = "anon:" + hashlib.sha256(guest_token.encode()).hexdigest()
-            try:
-                conversation = request.app.state.conversations.acquire(req.conversation_id, owner)
-            except ConversationError as exc:
-                raise HTTPException(status_code=exc.status, detail=exc.detail) from None
+            conversation = request.app.state.conversations.acquire(req.conversation_id, owner)
             with privacy_scope(
                 token or "",
                 guest_token or "",

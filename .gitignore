@@ -1,6 +1,8 @@
 # --- Segreti ---
 .env
+.env.*
 *.env
+*.env.*
 !.env.example
 
 # --- Python ---
@@ -26,7 +28,17 @@ coverage.xml
 
 # --- Vector store / dati locali ---
 chroma_data/
-*.sqlite3
+*.sqlite3*
+*.sqlite
+*.sqlite-*
+
+# Dump, log e backup locali possono contenere segreti o dati clienti.
+*.sql
+*.sql.gz
+*.dump
+*.log
+backup/
+backups/
 
 # --- IDE / OS ---
 .vscode/

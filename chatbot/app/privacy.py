@@ -30,6 +30,7 @@ def redact(value: str) -> str:
     private = (
         *_private_values.get(),
         settings.session_secret,
+        settings.wrag_bridge_secret,
         settings.openai_api_key,
         settings.wc_consumer_key,
         settings.wc_consumer_secret,

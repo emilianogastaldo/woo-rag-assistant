@@ -1,10 +1,16 @@
-"""Bounded process-local storage. Replace through ConversationStore for shared deployments."""
+"""Conversazioni limitate, con persistenza SQLite per il backend a singolo worker."""
 
 from __future__ import annotations
 
+import fcntl
+import json
+import os
 import secrets
+import sqlite3
 import time
-from dataclasses import dataclass, field
+from contextlib import closing, contextmanager
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -70,6 +76,69 @@ class MemoryConversationStore:
 
     def release(self, conversation: Conversation) -> None:
         conversation.busy = False
+
+
+class SQLiteConversationStore(MemoryConversationStore):
+    """Riusa i limiti in memoria e salva atomicamente solo i turni completati."""
+
+    def __init__(self, path: str | Path, clock=time.time):
+        super().__init__(clock=clock)
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = os.open(str(self.path) + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            # ponytail: un solo worker; store e rate limiter condivisi prima di scalare.
+            fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            descriptor = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
+            os.close(descriptor)
+            with self._database() as db:
+                db.execute("""CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY, owner TEXT NOT NULL, expires REAL NOT NULL,
+                    turns INTEGER NOT NULL, history TEXT NOT NULL
+                )""")
+                db.execute("DELETE FROM conversations WHERE expires <= ?", (self.clock(),))
+                for cid, owner, expires, turns, history in db.execute(
+                    "SELECT id, owner, expires, turns, history FROM conversations"
+                ):
+                    messages = [
+                        (HumanMessage if i % 2 == 0 else AIMessage)(content=content)
+                        for i, content in enumerate(json.loads(history))
+                    ]
+                    self.rows[cid] = Conversation(cid, owner, expires, messages, turns)
+        except BaseException:
+            self.close()
+            raise
+
+    @contextmanager
+    def _database(self):
+        try:
+            with closing(sqlite3.connect(self.path, timeout=1)) as db, db:
+                db.execute("PRAGMA secure_delete = ON")
+                yield db
+        except sqlite3.Error:
+            raise ConversationError(503, "Conversazioni temporaneamente non disponibili") from None
+
+    def acquire(self, conversation_id: str | None, owner: str) -> Conversation:
+        with self._database() as db:
+            db.execute("DELETE FROM conversations WHERE expires <= ?", (self.clock(),))
+        return super().acquire(conversation_id, owner)
+
+    def commit(self, conversation: Conversation, message: str, reply: str) -> None:
+        candidate = replace(conversation, history=list(conversation.history))
+        super().commit(candidate, message, reply)
+        with self._database() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO conversations VALUES (?, ?, ?, ?, ?)",
+                (candidate.id, candidate.owner, candidate.expires, candidate.turns,
+                 json.dumps([m.content for m in candidate.history], ensure_ascii=False)),
+            )
+        conversation.history = candidate.history
+        conversation.turns = candidate.turns
+
+    def close(self) -> None:
+        if self._lock is not None:
+            os.close(self._lock)
+            self._lock = None
 
 
 class MemoryRateLimiter:

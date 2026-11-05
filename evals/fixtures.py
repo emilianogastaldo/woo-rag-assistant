@@ -89,6 +89,10 @@ PLANS = {
     "adv-login": [],
     "adv-unavailable": [(ORDER, {"numero_ordine": 22})],
     "adv-no-delivery": [(ORDER, {"numero_ordine": 24}), (RAG, {"domanda": "Resi e Rimborsi"})],
+    "followup-shipping": [(RAG, {"domanda": "Spedizioni"})],
+    "followup-order": [(ORDER, {"numero_ordine": 22})],
+    "ambiguous-request": [],
+    "isolation-followup": [(ORDER, {"numero_ordine": 23})],
 }
 
 
@@ -170,6 +174,8 @@ class ScriptedLLM:
             reply = "Per consultare gli ordini devi accedere al tuo account."
         elif "Nessun ordine con questo numero" in context:
             reply = "Ordine non trovato: verifica il numero."
+        elif self.case_id == "ambiguous-request":
+            reply = "Quale prodotto o ordine intendi? Puoi indicare il codice o il numero?"
         elif not self.plan:
             reply = "Posso aiutarti solo con il negozio, prodotti e acquisti."
         else:

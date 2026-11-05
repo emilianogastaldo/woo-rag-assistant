@@ -43,6 +43,8 @@ services:
       REQUEST_DEADLINE_SECONDS: "10"
       SESSION_SECRET: synthetic-session
       DEMO_ENABLED: "true"
+      CONVERSATION_DB_PATH: /state/api.sqlite3
+      CONVERSATION_MAX_TURNS: "4"
       CUSTOMER_CACHE_TTL_SECONDS: "2"
       CUSTOMER_CACHE_CAPACITY: "1"
       RATE_LIMIT_REQUESTS: "100"
@@ -52,11 +54,13 @@ services:
     volumes:
       - ../chatbot:/app:ro
       - ../widget:/widget:ro
+      - conversations:/state
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers
   disabled:
     <<: *api
     environment:
       <<: *api-env
+      CONVERSATION_DB_PATH: /state/disabled.sqlite3
       DEMO_ENABLED: "false"
       APP_ENV: production
       SESSION_SECRET: synthetic-production-secret-with-40-characters
@@ -64,11 +68,12 @@ services:
     <<: *api
     environment:
       <<: *api-env
+      CONVERSATION_DB_PATH: /state/limits.sqlite3
       CONVERSATION_TTL_SECONDS: "2"
       CONVERSATION_CAPACITY: "2"
       CONVERSATION_MAX_TURNS: "2"
       RATE_LIMIT_REQUESTS: "8"
-      RATE_LIMIT_WINDOW_SECONDS: "3"
+      RATE_LIMIT_WINDOW_SECONDS: "30"
   widget:
     image: node@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
     pull_policy: never
@@ -94,3 +99,4 @@ networks:
     internal: true
 volumes:
   data:
+  conversations:

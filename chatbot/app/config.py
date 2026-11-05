@@ -102,9 +102,12 @@ class Settings(BaseSettings):
 
     # Sessione
     session_secret: str = "change-me-in-production"
+    # Shared only with the WordPress proxy; never sent to the widget.
+    wrag_bridge_secret: str = ""
     session_ttl_seconds: int = Field(default=28800, ge=1)
     app_env: Literal["development", "production"] = "development"
     demo_enabled: bool = False
+    conversation_db_path: str = "state/conversations.sqlite3"
     conversation_ttl_seconds: int = Field(default=1800, ge=1)
     conversation_capacity: int = Field(default=1000, ge=1)
     conversation_max_turns: int = Field(default=20, ge=1, le=100)
@@ -126,6 +129,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_security(self):
+        if self.wrag_bridge_secret and (
+            len(self.wrag_bridge_secret.strip()) < 32
+            or self.wrag_bridge_secret == self.session_secret
+        ):
+            raise ValueError("WRAG_BRIDGE_SECRET must be distinct and at least 32 characters")
         if self.app_env == "production":
             if len(self.session_secret.strip()) < 32 or self.session_secret.strip().lower() in {
                 "change-me-in-production",

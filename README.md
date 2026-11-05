@@ -3,6 +3,12 @@
 Assistente clienti per e-commerce WooCommerce, basato su **RAG** e **tool calling**.
 Project work individuale per il Master AI Engineering (Boolean).
 
+Consegna del codice su GitHub entro la mezzanotte del **18/12**; presentazione
+facoltativa il **19/12**. [Indicazioni Boolean e checklist di consegna](docs/consegna.md).
+
+Per preparare la presentazione facoltativa: [traccia del progetto](docs/presentazione.md),
+con scaletta, demo, risultati verificati e prossimi miglioramenti.
+
 Il chatbot si incorpora in un negozio WooCommerce e:
 
 1. risponde sulla conoscenza statica del negozio (prodotti, FAQ, policy di spedizione
@@ -128,6 +134,36 @@ vanno copiate in `.env` come `WC_CONSUMER_KEY` / `WC_CONSUMER_SECRET`.
 - API del chatbot: <http://localhost:8000/docs>
 - Pagina di demo del widget: <http://localhost:8000/widget/>
 
+Il setup applica anche **Trama**, child theme del tema WordPress Twenty Twenty-Five:
+homepage, navigazione, policy formattate e sei immagini locali con categorie.
+Tema e asset sono montati dal Compose, senza page builder o script incollati.
+Lo stesso comando di setup può essere ripetuto: mantiene ID, media, pagine e menu;
+come il seed originale, aggiorna prezzi, descrizioni e stock dei sei SKU demo.
+Conserva le categorie aggiunte dal negoziante e non riapplica impostazioni del tema
+già inizializzate. Provenienza e CC0 dei soli asset: [catalogo](seed/assets/README.md).
+
+Su un negozio già popolato, il solo allestimento del tema si applica con:
+
+```bash
+docker compose run --rm wpcli wp eval-file /seed/storefront.php
+```
+
+Il comando conserva la configurazione già inizializzata e non aggiorna i prodotti.
+
+Per la chat dentro WordPress impostare in `.env` **`WRAG_BRIDGE_SECRET`** casuale
+di almeno 32 caratteri, distinto da `SESSION_SECRET`, quindi:
+
+```bash
+docker compose up -d --force-recreate wordpress chatbot-api
+```
+
+Il ponte usa `http://chatbot-api:8000` nella rete Docker e carica il widget nel
+footer. Il pulsante Account usa il login WordPress nativo: `mario.rossi` /
+`demo_secret_a`, oppure `luigi.verdi` / `demo_secret_b`. Sono credenziali pubbliche
+per dati sintetici locali; [configurazione e limiti del ponte](docs/issue-18-results.md).
+Il login del negozio funziona con `DEMO_ENABLED=false`; il toggle descritto sotto
+appartiene invece alla pagina autonoma `/widget/`.
+
 ## Demo
 
 La demo richiede `DEMO_ENABLED=true` in ambiente `development` (default: disabilitata).
@@ -153,6 +189,31 @@ l'assistenza.
 | 4 | Mario | ordine di Luigi | «ordine non trovato» |
 | 5 | Mario | «Posso ancora restituire l'ordine 21?» | tool + RAG; scadenza dai 30 giorni dalla consegna verificata |
 | 6 | qualsiasi | «Che tempo farà domani?» | fuori dominio, declina |
+
+Per preparare il **18/12/2026** (consegna del codice) la prova di reso per la
+presentazione del **19/12**, dopo il setup ordinario aggiungere una sola fixture:
+
+```bash
+docker compose run --rm wpcli wp eval-file /seed/demo-returns.php 2026-12-18
+```
+
+Usare l'ID stampato: consegna verificata **19/11/2026**, termine **19/12/2026**;
+il 18 è entro termine, il 19 è l'ultimo giorno, il 20 è fuori termine. Confrontare
+con l'ordine storico consegnato il 22/06 (termine 22/07) e quello senza tracking
+(astensione). La preparazione conserva gli storici; ripeterla con la stessa data
+non cambia ordini o date. Il backend usa il clock reale: una domanda datata
+esplicitamente prima della presentazione resta una simulazione.
+Per una prova valida in un'altra data usare un **nuovo ambiente isolato** e passare
+quella data; il comando rifiuta di spostare una fixture già preparata.
+ID d'esempio e domande: [scenari reso](docs/issue-24-results.md).
+
+La verifica finale ripetibile da un clone, con volumi propri e provider sintetici,
+è `python3 evals/run_issue19_import.py --demo-final`; prerequisiti, comandi di build,
+risultati e schermate sono nel [report finale](docs/issue-25-results.md).
+Anteprime Trama: [homepage desktop](docs/screenshots/trama-home-desktop.png),
+[mobile](docs/screenshots/trama-home-mobile.png),
+[catalogo](docs/screenshots/trama-catalog-desktop.png) e
+[chat mobile](docs/screenshots/trama-chat-mobile.png) con risposta simulata.
 
 ## Ingestion e deploy versionati
 
@@ -237,7 +298,10 @@ reverse proxy sul dominio del negozio. Il solo conversation ID non autorizza acc
 rifiuta `DEMO_ENABLED=true`. Generare un segreto casuale; `.env.example` è solo un
 template di sviluppo. `/demo/login` è assente anche da OpenAPI quando disabilitato;
 `/session/config` consente al widget di nascondere i pulsanti demo. Il login reale
-Woo/SSO resta un'integrazione da fornire prima di esporre ordini in produzione.
+WordPress/WooCommerce è disponibile tramite il ponte opzionale della
+[issue #18](docs/issue-18-results.md): verifica cookie e nonce a ogni turno,
+con un segreto separato e token backend mai esposti al browser. Prima di usarlo
+in produzione configurare HTTPS/rete privata, cache delle pagine e rate limit.
 Il token demo è restituito solo dall'endpoint di login, senza campo email;
 nessuna credenziale viene inclusa nelle risposte chat.
 
@@ -260,11 +324,20 @@ numero di tool/tentativi e deadline; il budget `MODEL_TOKEN_BUDGET` riguarda la
 generazione. Per provider/tokenizer diversi verificare la stima prima del deploy.
 Tutti i valori sono configurabili in `.env.example` e passati dal Compose.
 
-Store, cache e rate limiter sono **in memoria per processo**. Avviare un solo worker:
-riavvio/reload perde history, cache e quote; più worker hanno store separati e
-moltiplicano le quote. L'interfaccia `ConversationStore` è sostituibile per un futuro
-store condiviso; nessuna infrastruttura esterna viene introdotta. Le voci scadute
-sono eliminate alla successiva operazione, entro la capienza globale.
+Le conversazioni sono salvate in **SQLite** dopo ogni turno completato. Un
+riavvio/reload del backend conserva history, owner, scadenza assoluta e contatore
+dei turni. Compose monta il volume `conversation_state`; nell'avvio Python locale
+`CONVERSATION_DB_PATH` indica il file (default `state/conversations.sqlite3`).
+La ripresa richiede lo stesso token/cookie valido e il `conversation_id`: il widget
+li conserva in memoria, quindi ricaricare la pagina avvia una nuova chat.
+
+Avviare un solo worker: un lock POSIX sul database impedisce a due processi di
+usare contemporaneamente lo stesso store. Cache e rate limiter restano in memoria
+e si azzerano al riavvio. Le conversazioni scadute vengono eliminate all'avvio e
+alla successiva acquisizione; un turno interrotto non viene salvato. SQLite contiene
+solo messaggi utente e risposte finali già redatti, più il digest dell'owner; il
+file non è cifrato. Proteggere volume e backup come dati di conversazione. Il file
+e il lock sono creati con permessi `0600`; un errore di salvataggio restituisce 503.
 
 Il rate limit usa il peer di rete, non header forniti dal client. Il Compose avvia
 Uvicorn con `--no-proxy-headers`: dietro proxy, tutti i client condividono la quota
@@ -287,6 +360,20 @@ L'harness usa API reali, Chroma dedicato, provider sintetici e test DOM del widg
 con HTTP reale, senza porte pubblicate né accesso esterno. Nessuna modifica a `.env`
 o alla demo condivisa.
 
+## Collegamento con Modulo 3 · Lezione 12
+
+Il laboratorio viene applicato ai dati del negozio: ingestion Woo/WordPress e
+Chroma per i documenti, tool REST scoped per i dati aggiornati, citazioni verificate
+e valutazione con risposte attese in `evals/golden.jsonl`. Le API WooCommerce
+coprono il ruolo delle tabelle SQL del laboratorio mantenendo l'autorizzazione
+per cliente. La persistenza SQLite completa l'obiettivo della chat riprendibile
+dopo il riavvio del backend, usando il loop agente già presente.
+
+`chatbot/tests/test_conversation_persistence.py` verifica offline il follow-up
+dopo riavvio per ospiti e clienti, l'isolamento fra sessioni, TTL, turni, capienza,
+concorrenza e rollback dopo un errore di scrittura. Per routing, fonti e risposte
+si riusa il runner di valutazione descritto sotto, con ripetizioni e baseline.
+
 ## Valutazione
 
 `evals/golden.jsonl` contiene 30 domande con risposta, fonte, strada e tool attesi:
@@ -302,9 +389,13 @@ docker compose run --rm --no-deps eval-offline python -m evals.run_agent_eval --
 I report JSON in `evals/results/` misurano routing, hit@k/MRR, precisione delle
 citazioni, validità degli ID, correttezza/astensione, latenza e chiamate, senza salvare
 conversazioni o segreti. `--baseline` evidenzia le regressioni per domanda. Il live richiede
-**entrambi** `--live --allow-external` e usa solo dati sintetici; anche il precedente
+`--live --allow-external --max-estimated-usd <budget>` e usa solo dati sintetici; anche il precedente
 sweep di retrieval è ora protetto da opt-in. Comandi, costi, definizioni delle
 metriche e limiti sono in [`evals/README.md`](evals/README.md).
+
+Il [report #17](docs/issue-17-results.md) documenta i casi contestuali aggiuntivi,
+preflight e costi da usage; le prove con provider reale restano da autorizzare.
+Per caricare prodotti di prova, vedere il [confronto seed/CSV ufficiale #19](docs/issue-19-results.md).
 
 ## Stack
 

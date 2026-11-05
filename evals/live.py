@@ -2,10 +2,59 @@
 
 import math
 
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
+from openai import AsyncOpenAI
 
 from app.config import settings
+from evals.costs import EMBEDDING_INPUT_MAX_BYTES, SETUP_TIMEOUT_SECONDS
 from evals.fixtures import documents
+
+
+class MeasuredEmbeddings:
+    """Conserva usage numerico, mai input o risposte grezze nei report."""
+
+    def __init__(self):
+        self.input_tokens = 0
+        self.requests_without_usage = 0
+        self.client = AsyncOpenAI(
+            api_key=settings.openai_api_key, max_retries=0,
+            timeout=SETUP_TIMEOUT_SECONDS,
+            base_url="https://api.openai.com/v1",
+        )
+
+    async def aclose(self):
+        await self.client.close()
+
+    async def aembed_documents(self, texts):
+        if any(len(text.encode()) > EMBEDDING_INPUT_MAX_BYTES for text in texts):
+            raise ValueError("synthetic embedding input exceeds the preflight limit")
+        self.requests_without_usage += 1
+        result = await self.client.embeddings.create(
+            model=settings.embedding_model, input=texts, encoding_format="float",
+        )
+        tokens = getattr(getattr(result, "usage", None), "total_tokens", None)
+        if isinstance(tokens, int) and tokens >= 0:
+            self.input_tokens += tokens
+            self.requests_without_usage -= 1
+        return [item.embedding for item in sorted(result.data, key=lambda item: item.index)]
+
+    async def aembed_query(self, text):
+        return (await self.aembed_documents([text]))[0]
+
+
+class MeasuredModel:
+    def __init__(self, model):
+        self.model = model
+        self.requests_without_usage = 0
+
+    async def ainvoke(self, messages):
+        self.requests_without_usage += 1
+        result = await self.model.ainvoke(messages)
+        usage = result.usage_metadata or {}
+        if all(isinstance(usage.get(key), int) and usage[key] >= 0
+               for key in ("input_tokens", "output_tokens")):
+            self.requests_without_usage -= 1
+        return result
 
 
 class LiveStore:
@@ -38,25 +87,23 @@ class LiveStore:
 
 
 async def prepare_store():
-    embeddings = OpenAIEmbeddings(
-        model=settings.embedding_model,
-        api_key=settings.openai_api_key,
-        max_retries=0,
-        request_timeout=30,
-        chunk_size=64,
-        check_embedding_ctx_length=False,
-    )
+    embeddings = MeasuredEmbeddings()
     docs = documents()
-    vectors = await embeddings.aembed_documents([doc.page_content for doc in docs])
+    try:
+        vectors = await embeddings.aembed_documents([doc.page_content for doc in docs])
+    except BaseException:
+        await embeddings.aclose()
+        raise
     return LiveStore(embeddings, docs, vectors)
 
 
 def build_model(toolset):
-    return ChatOpenAI(
+    return MeasuredModel(ChatOpenAI(
         model=settings.openai_model,
         api_key=settings.openai_api_key,
+        base_url="https://api.openai.com/v1",
         temperature=0,
         max_retries=0,
-        timeout=30,
-        max_tokens=512,
-    ).bind_tools(toolset.tools, parallel_tool_calls=False)
+        timeout=settings.provider_timeout_seconds,
+        max_tokens=settings.model_max_output_tokens,
+    ).bind_tools(toolset.tools, parallel_tool_calls=False))
