@@ -10,7 +10,15 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.config import settings
 from app.resilience import FailureKind, RecoverableFailure
@@ -30,7 +38,8 @@ STOCK_LABELS = {
 
 def safe_url(value: str | None) -> str | None:
     """Woo URLs are untrusted; preserve local demo URLs, never active schemes/credentials."""
-    if not value or any(ord(char) < 33 for char in value) or "\\" in value:
+    if (not isinstance(value, str) or not value or any(ord(char) < 33 for char in value)
+            or "\\" in value):
         return None
     try:
         parsed = urlsplit(value)
@@ -123,6 +132,11 @@ class CatalogProduct(BaseModel):
     type: str
     variants: list[ProductVariant] = Field(default_factory=list)
     variants_may_have_more: bool = False
+
+    @field_validator("url", "image")
+    @classmethod
+    def public_url(cls, value):
+        return safe_url(value)
 
 
 class ProductPage(BaseModel):

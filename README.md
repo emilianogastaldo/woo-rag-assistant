@@ -358,6 +358,17 @@ assente chiede di precisarlo. Prodotti privati o nascosti sono esclusi anche se 
 server ignora i filtri. Per le caratteristiche si usa la KB, per prezzo e stock
 i risultati live.
 
+`POST /chat` aggiunge `products` (default `[]`) ai campi già esistenti. Le schede
+provengono esclusivamente dall'ultima ricerca prodotti verificata del turno;
+testo e cronologia del modello non possono crearle. Una nuova ricerca vuota o
+fallita azzera le schede di quel turno. Il widget usa testo DOM e link/immagini
+HTTP(S) verificati, senza interpretare HTML del modello o del catalogo.
+
+I tre casi sintetici in `evals/catalog-gifts.jsonl` verificano il meccanismo di
+consiglio entro budget, astensione e chiarimento con `ScriptedLLM` e Woo finti:
+`pytest -q tests/test_product_cards.py`. Non misurano la capacità di un modello
+reale di scegliere prodotti pertinenti; quella prova resta separata in #17.
+
 L’elenco generale usa `elenco_prodotti`, senza ricerca vettoriale: legge fino a
 10 prodotti pubblicati e segnala se il catalogo continua. Le risposte basate solo
 su questi dati non hanno citazioni documentali (`sources: []`). Per descrizioni
