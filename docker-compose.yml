@@ -34,7 +34,7 @@ services:
       retries: 10
 
   wordpress:
-    image: wordpress@sha256:cc795f5862b2f3891a805106917089558eef28a56755bd8ac8308d1ab57b28d7
+    image: wordpress:7.1.4-php8.5-apache@sha256:63f89c89eeba29421a2660ccc87be392e6d72148724d92fa3d0756e9700786b9
     depends_on:
       db:
         condition: service_healthy
@@ -194,7 +194,7 @@ services:
   # Esecuzione: docker compose run --rm wpcli wp <comando>
   # oppure lo script completo: docker compose run --rm wpcli /seed/setup.sh
   wpcli:
-    image: wordpress@sha256:f8aeb68164c6a04f5dcc91da30d8ffa096b0f7fafb7a65f144c2dd62587caca0
+    image: wordpress:cli-php8.5@sha256:b28e27e8e5f49cbf55ea3c0e533fda280707b8cc6cf85ace085d2746856c037a
     profiles: ["cli"]
     depends_on:
       wordpress:

@@ -120,6 +120,11 @@ non si conferma nemmeno che quell'ordine esista.
 
 ## Avvio
 
+Il Compose usa **WordPress 7.1.4 e PHP 8.5.12**, con immagini bloccate per digest,
+e il seed installa **WooCommerce 10.0.4**. Anche WP-CLI usa PHP 8.5.12.
+Per una demo preesistente, cambiare immagine non aggiorna automaticamente il core
+WordPress nel volume: consultare la [nota di aggiornamento](docs/wordpress-7.1.4.md).
+
 ### Prerequisiti
 
 - Git, Docker Engine/Docker Desktop **avviato** e Docker Compose v2 o successivo
