@@ -54,6 +54,9 @@ configurazione ospite, login nativo di Mario e `/health` del backend. Porte anco
 limitate a `127.0.0.1`. I volumi originali sono conservati; la configurazione locale
 precedente è in `env/upgrade-wp714/demo-local.before.yml` (ignorata da Git).
 
-Non è stata completata una prova chat con OpenAI reale: l'indicizzazione della demo
-locale resta bloccata dal credito API esaurito, già rilevato prima dell'aggiornamento.
-Il controllo `/health` non implica che la knowledge base sia pronta.
+Alla verifica iniziale l’indicizzazione era bloccata dal credito API esaurito.
+Il 7 novembre, dopo la sostituzione della chiave, è stata completata l’ingestion
+dei sei prodotti e delle tre policy. `/ready` è passato a `ready`; una domanda
+reale tramite il ponte WordPress sul costo della spedizione ha restituito 4,90 €
+sotto 49 €, gratuita da 49 €, con citazione della pagina Spedizioni.
+È uno smoke test, non la valutazione live completa. La chiave non è pubblicata.
