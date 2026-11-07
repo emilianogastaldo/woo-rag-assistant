@@ -143,7 +143,7 @@ async def test_bounded_public_lookup_does_not_claim_unique_match_in_partial_sear
     rows = [make_order(i, CUSTOMER_A, number=f"N-{i}") for i in range(1, 21)]
     woo = FakeWooClient({"orders": rows})
     result = await OrderService(CUSTOMER_A, woo).get_order("N-1")
-    assert result == ORDER_NOT_FOUND + "\n" + SEARCH_LIMIT
+    assert result == SEARCH_LIMIT
     assert len(woo.calls) == 5 and "Zaino" not in result
 
 

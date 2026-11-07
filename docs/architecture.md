@@ -163,13 +163,15 @@ dell'ordine ma non certifica che il corriere abbia consegnato il pacco. Il tool 
 la restituisce quindi con l'etichetta **Data completamento** e non la usa mai per
 calcolare un reso.
 
-La fonte scelta per la demo è il metadata ordine `_wrag_delivery_date`, popolato
-dall'integrazione di tracking soltanto alla conferma del corriere e salvato in ISO 8601.
-Il tool accetta esclusivamente quel metadata valido come **Data consegna verificata**.
+La fonte sintetica scelta per la demo è il metadata ordine `_wrag_delivery_date`,
+salvato in ISO 8601. Sul negozio reale il titolare deve concordare una fonte scritta
+esclusivamente dopo la conferma di consegna; non è stato scelto o certificato un
+plugin/corriere. L'adapter configurabile (#33) legge soltanto le chiavi concordate.
 Se manca o non è leggibile, riporta esplicitamente che la scadenza del reso non è
 calcolabile con certezza; non stima la data dal completamento o dallo stato `completed`.
-Quando la data è disponibile, il tool calcola la scadenza aggiungendo 30 giorni a
-quella data, in linea con la policy di reso.
+Quando la data è disponibile, il tool usa i giorni configurati per il reso (30 nella
+demo); il calcolo è disabilitabile. Stato ordine e stato spedizione sono distinti.
+Configurazione, fallback e decisioni del pilota: [guida tracking](order-tracking.md).
 
 Il seed assegna questo metadata all'ordine demo completato di Mario e applica una
 piccola migrazione idempotente (`wrag_seed_delivery_date_v1`) per gli ambienti seed

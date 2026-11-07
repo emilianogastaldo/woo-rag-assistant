@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from app.config import settings
 from app.resilience import FailureKind, RecoverableFailure
 from app.tools.payloads import validate_rows
+from app.tools.tracking import SHIPMENT_LABELS, read_tracking
 from app.tools.woo_client import WooClient, shared_woo_client
 
 ORDER_NOT_FOUND = (
@@ -28,7 +29,10 @@ ORDER_NOT_FOUND = (
 
 MAX_SEARCH_PAGES = 5
 SEARCH_PAGE_SIZE = 20
-SEARCH_LIMIT = "Ricerca limitata ai 100 ordini più recenti dell'account; contatta l'assistenza."
+SEARCH_LIMIT = (
+    "Non posso identificare con certezza l'ordine richiesto. "
+    "Ricerca limitata ai 100 ordini più recenti dell'account; contatta l'assistenza."
+)
 
 
 class OrderLookup(BaseModel):
@@ -62,12 +66,6 @@ class OrderList(BaseModel):
         return self
 
 
-# Convenzione del negozio: questo metadata viene scritto dall'integrazione di
-# tracking soltanto dopo la conferma di consegna del corriere. WooCommerce non
-# espone una data di consegna standard, quindi date_completed non è un sostituto.
-DELIVERY_DATE_META_KEY = "_wrag_delivery_date"
-RETURN_WINDOW_DAYS = 30
-
 STATUS_LABELS = {
     "pending": "in attesa di pagamento",
     "processing": "in lavorazione",
@@ -96,24 +94,6 @@ def _format_date(value: Any) -> str | None:
     return str(value) if value else None
 
 
-def _verified_delivery_at(order: dict[str, Any]) -> datetime | None:
-    """Restituisce solo la consegna esplicitamente confermata dal tracking.
-
-    ``date_completed`` rappresenta il completamento amministrativo dell'ordine
-    e non viene mai usata qui: non prova che il pacco sia stato consegnato.
-    """
-    metadata = order.get("meta_data", [])
-    if not isinstance(metadata, list):
-        return None
-
-    for metadata_item in metadata:
-        if not isinstance(metadata_item, dict):
-            continue
-        if metadata_item.get("key") == DELIVERY_DATE_META_KEY:
-            return _parse_datetime(metadata_item.get("value"))
-    return None
-
-
 def format_order(order: dict[str, Any]) -> str:
     items = ", ".join(
         f"{item.get('quantity', 1)}× {item.get('name', 'articolo')}"
@@ -128,16 +108,31 @@ def format_order(order: dict[str, Any]) -> str:
     completed_at = _format_date(order.get("date_completed"))
     if completed_at:
         lines.append(f"Data completamento: {completed_at}")
-    delivered_at = _verified_delivery_at(order)
+    tracking = read_tracking(order)
+    lines.append(f"Stato spedizione: {SHIPMENT_LABELS.get(tracking.state, 'non disponibile')}")
+    if tracking.incomplete:
+        lines.append("Tracking incompleto o incoerente: contatta l'assistenza per una verifica.")
+    if tracking.url:
+        lines.append(f"Link tracking: {tracking.url}")
+    delivered_at = tracking.delivered_at
     if delivered_at:
         lines.append(f"Data consegna verificata: {delivered_at.strftime('%d/%m/%Y')}")
-        deadline = delivered_at + timedelta(days=RETURN_WINDOW_DAYS)
-        lines.append(
-            f"Scadenza reso ({RETURN_WINDOW_DAYS} giorni dalla consegna verificata): "
-            f"{deadline.strftime('%d/%m/%Y')}"
-        )
     else:
         lines.append("Data consegna verificata: non disponibile")
+    days = settings.order_return_window_days
+    if not days:
+        lines.append("Scadenza reso: calcolo disabilitato; verifica la policy con l'assistenza.")
+    elif delivered_at:
+        try:
+            deadline = delivered_at + timedelta(days=days)
+        except OverflowError:
+            lines.append("Scadenza reso: non calcolabile; contatta l'assistenza.")
+        else:
+            lines.append(
+                f"Scadenza reso ({days} giorni dalla consegna verificata): "
+                f"{deadline.strftime('%d/%m/%Y')}"
+            )
+    else:
         lines.append(
             "Scadenza reso: non calcolabile senza una data di consegna verificata; "
             "contatta l'assistenza."
@@ -186,7 +181,7 @@ class OrderService:
             if len(rows) < SEARCH_PAGE_SIZE:
                 break
         else:
-            return ORDER_NOT_FOUND + "\n" + SEARCH_LIMIT
+            return SEARCH_LIMIT
         return format_order(next(iter(matches.values()))) if matches else ORDER_NOT_FOUND
 
     async def list_orders(self, limit: int = 5, *, date_from: str | None = None,

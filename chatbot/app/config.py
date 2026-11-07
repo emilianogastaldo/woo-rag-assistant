@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     wc_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     wc_retry_attempts: int = Field(default=1, ge=0, le=2)
     wc_order_timezone: str = "Europe/Rome"
+    tracking_delivery_date_meta_key: str = Field(default="_wrag_delivery_date", max_length=200)
+    tracking_status_meta_key: str = Field(default="", max_length=200)
+    tracking_url_meta_key: str = Field(default="", max_length=200)
+    tracking_status_map: dict[
+        str, Literal["created", "accepted", "in_transit", "delivered", "exception"]
+    ] = Field(default_factory=dict)
+    order_return_window_days: int = Field(default=30, ge=0, le=3650)
 
     @model_validator(mode="after")
     def validate_order_timezone(self):
