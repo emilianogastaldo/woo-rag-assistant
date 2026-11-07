@@ -32,7 +32,7 @@ Widget chat (JS) → Backend FastAPI → { ChromaDB | OpenAI | WooCommerce REST 
 | Agente router | `chatbot/app/agent.py` | toolset condizionale e loop di tool calling |
 | Catena RAG | `chatbot/app/rag/chain.py` | retrieval con soglia e fonti citabili |
 | Tool ordini | `chatbot/app/tools/orders.py` | sola lettura, scoped sul cliente |
-| Tool catalogo | `chatbot/app/tools/catalog.py` | disponibilità e prezzo in tempo reale |
+| Tool catalogo | `chatbot/app/tools/catalog.py` | elenco prodotti, disponibilità e prezzo in tempo reale |
 | Sessione | `chatbot/app/auth/session.py` | verifica token, risoluzione customer ID |
 | Ingestion | `chatbot/app/ingest.py` | WooCommerce/WP → chunking → embedding → Chroma |
 | Widget | `widget/chat.js` | UI chat incorporabile con un solo tag |
@@ -121,7 +121,8 @@ non si conferma nemmeno che quell'ordine esista.
 ## Avvio
 
 Il Compose usa **WordPress 7.1.4 e PHP 8.5.12**, con immagini bloccate per digest,
-e il seed installa **WooCommerce 10.0.4**. Anche WP-CLI usa PHP 8.5.12.
+e il seed installa **WooCommerce 11.2.2**. Anche WP-CLI usa PHP 8.5.12.
+[Verifica aggiornamento WooCommerce e studio MCP](docs/woocommerce-mcp.md).
 Per una demo preesistente, cambiare immagine non aggiorna automaticamente il core
 WordPress nel volume: consultare la [nota di aggiornamento](docs/wordpress-7.1.4.md).
 
@@ -308,6 +309,7 @@ l'assistenza.
 
 | # | Sessione | Domanda | Atteso |
 | --- | --- | --- | --- |
+| 0 | ospite | «Che prodotti ci sono?» | elenco WooCommerce con prezzi e disponibilità attuali |
 | 1 | ospite | «Quanto costa la spedizione standard?» | RAG con fonti |
 | 2 | ospite | «A che punto è il mio ordine 22?» | declino, invito ad accedere |
 | 3 | Mario | «A che punto è il mio ordine 22?» | tool ordini |
@@ -339,6 +341,11 @@ Anteprime Trama: [homepage desktop](docs/screenshots/trama-home-desktop.png),
 [mobile](docs/screenshots/trama-home-mobile.png),
 [catalogo](docs/screenshots/trama-catalog-desktop.png) e
 [chat mobile](docs/screenshots/trama-chat-mobile.png) con risposta simulata.
+
+L’elenco generale usa `elenco_prodotti`, senza ricerca vettoriale: legge fino a
+10 prodotti pubblicati e segnala se il catalogo continua. Le risposte basate solo
+su questi dati non hanno citazioni documentali (`sources: []`). Per descrizioni
+e caratteristiche si usa il RAG, per un nome/SKU specifico il tool disponibilità.
 
 ## Ingestion e deploy versionati
 

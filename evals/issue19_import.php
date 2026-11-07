@@ -3,7 +3,7 @@
 function issue19_check( $condition, $message ) {
     if ( ! $condition ) { throw new RuntimeException( $message ); }
 }
-issue19_check( WC_VERSION === '10.0.4', 'Expected WooCommerce 10.0.4' );
+issue19_check( WC_VERSION === '11.2.2', 'Expected WooCommerce 11.2.2' );
 issue19_check( count( wc_get_products( [ 'limit' => -1 ] ) ) === 6, 'Seed must contain six products after two runs' );
 issue19_check( count( wc_get_orders( [ 'limit' => -1 ] ) ) === 3, 'Seed must contain three orders after two runs' );
 issue19_check( wc_get_product( wc_get_product_id_by_sku( 'SHOES-RUN-X' ) )->get_stock_status() === 'outofstock', 'Missing out-of-stock fixture' );

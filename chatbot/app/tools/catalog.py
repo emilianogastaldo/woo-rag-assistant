@@ -43,6 +43,20 @@ class CatalogService:
     def __init__(self, client: WooClient | None = None) -> None:
         self._woo = client or shared_woo_client()
 
+    async def list_products(self) -> str:
+        rows = await self._woo.get_json(
+            "products", {"status": "publish", "per_page": 11, "orderby": "id", "order": "asc"}
+        )
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
+        if not rows:
+            return "Nessun prodotto pubblicato nel catalogo."
+        result = "\n\n".join(format_product(row) for row in rows[:10])
+        if len(rows) > 10:
+            result += ("\n\nElenco parziale: primi 10 prodotti. "
+                       "Chiedi un nome o SKU per cercare altro.")
+        return result
+
     async def check_availability(self, product: str, limit: int = 3) -> str:
         query = (product or "").strip()
         if not query:

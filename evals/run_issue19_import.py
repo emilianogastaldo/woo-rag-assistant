@@ -49,8 +49,8 @@ def main():
     # Reuse already built, version-pinned issue7 images by immutable local image ID.
     images = {}
     for name, tag in {
-        "wordpress": "woo-issue19-wp:10.0.4",
-        "cli": "woo-issue19-cli:10.0.4",
+        "wordpress": "woo-issue19-wp:11.2.2",
+        "cli": "woo-issue19-cli:11.2.2",
         "db": "mariadb@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4",
     }.items():
         images[name] = run(["docker", "image", "inspect", tag, "--format", "{{.Id}}"]).strip()

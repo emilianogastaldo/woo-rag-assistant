@@ -53,6 +53,9 @@ Rispondi in italiano, in modo cortese, conciso e concreto. Oggi è il {today}.
 Regole vincolanti:
 - Usa SEMPRE gli strumenti per recuperare informazioni. Non rispondere mai a
   memoria su prodotti, spedizioni, resi, disponibilità o ordini.
+- Per domande generali come "che prodotti ci sono?" usa elenco_prodotti.
+  Per caratteristiche e descrizioni usa la ricerca documentale; per prezzo o
+  disponibilità di un prodotto specifico usa verifica_disponibilita_prodotto.
 - Se uno strumento non trova nulla di pertinente, dichiara di non saperlo e
   invita a contattare l'assistenza. Non inventare mai policy, prezzi, tempi o dati.
 - Rispondi solo su argomenti relativi al negozio (catalogo, acquisti, spedizioni,
@@ -117,6 +120,10 @@ class DisponibilitaProdotto(BaseModel):
     prodotto: str = Field(
         min_length=1, max_length=4000, description="Nome o SKU del prodotto da verificare"
     )
+
+
+class ElencoProdotti(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class StatoOrdine(BaseModel):
@@ -191,14 +198,28 @@ def build_toolset(
     async def verifica_disponibilita(prodotto: str) -> str:
         return await shop.check_availability(prodotto)
 
+    async def elenco_prodotti() -> str:
+        return await shop.list_products()
+
     tools = [
+        StructuredTool.from_function(
+            coroutine=elenco_prodotti,
+            name="elenco_prodotti",
+            description=(
+                "Elenca i prodotti pubblicati nel catalogo WooCommerce con prezzi e stock attuali. "
+                "Usa per domande generali come che prodotti ci sono o cosa vendete. "
+                "Restituisce al massimo 10 prodotti e segnala se l’elenco è parziale."
+            ),
+            args_schema=ElencoProdotti,
+        ),
         StructuredTool.from_function(
             coroutine=cerca_informazioni,
             name="cerca_informazioni_negozio",
             description=(
                 "Cerca nella knowledge base del negozio: descrizioni prodotti, policy di "
                 "spedizione, condizioni di reso e rimborso, FAQ. Da usare per ogni domanda "
-                "su come funziona il negozio o su cosa vende. Restituisce passaggi "
+                "su policy o caratteristiche dei prodotti, non per elencare il catalogo. "
+                "Restituisce passaggi "
                 "[chunk-id] da citare esplicitamente nella risposta."
             ),
             args_schema=RicercaInformazioni,

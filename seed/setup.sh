@@ -36,7 +36,7 @@ if wp plugin is-active woocommerce 2>/dev/null; then
 	log "WooCommerce gia attivo"
 else
 	log "Installazione WooCommerce"
-	wp plugin install woocommerce --version=10.0.4 --activate
+	wp plugin install woocommerce --version=11.2.2 --activate
 fi
 
 # --- 3. Permalink (necessari per /wp-json/wc/v3) ---

@@ -13,7 +13,7 @@ from app.rag.chain import RetrievalResult, Source
 
 SESSION = Session(email="mario.rossi@example.com", customer_id=12)
 
-ANON_TOOLS = {"cerca_informazioni_negozio", "verifica_disponibilita_prodotto"}
+ANON_TOOLS = {"cerca_informazioni_negozio", "verifica_disponibilita_prodotto", "elenco_prodotti"}
 ORDER_TOOLS = {"stato_ordine", "elenco_ordini"}
 
 
@@ -28,6 +28,9 @@ class FakeKnowledgeBase:
 
 
 class FakeCatalog:
+    async def list_products(self) -> str:
+        return "Prodotto: T-shirt Bio (SKU TSHIRT-BIO)"
+
     async def check_availability(self, product: str, limit: int = 3) -> str:
         return f"Prodotto: {product}\nDisponibilità: disponibile"
 
@@ -167,3 +170,17 @@ async def test_chiamata_a_tool_non_registrato_non_viene_eseguita():
     result = await answer("a che punto è l'ordine 22?", session=None, toolset=toolset, llm=llm)
     assert result.tools_used == []
     assert "accedere" in result.reply.lower()
+
+
+async def test_catalog_overview_uses_live_data_without_document_citations():
+    kb = FakeKnowledgeBase(RetrievalResult(""))
+    llm = FakeLLM(
+        AIMessage(content="", tool_calls=[{"name": "elenco_prodotti", "args": {}, "id": "cat"}]),
+        AIMessage(content="Vendiamo la T-shirt Bio."),
+    )
+    result = await answer("che prodotti ci sono?", session=None,
+                          toolset=anon_toolset(knowledge_base=kb), llm=llm)
+    assert result.reply == "Vendiamo la T-shirt Bio."
+    assert result.tools_used == ["elenco_prodotti"]
+    assert result.sources == []
+    assert kb.queries == []

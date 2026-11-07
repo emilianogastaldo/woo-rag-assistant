@@ -11,8 +11,8 @@ Servono Python 3, Docker e Compose. Dalla radice di un clone che contenga queste
 modifiche preparare una volta le immagini già definite nel progetto:
 
 ```bash
-docker build -f evals/Dockerfile.issue7 --target wordpress -t woo-issue19-wp:10.0.4 .
-docker build -f evals/Dockerfile.issue7 --target cli -t woo-issue19-cli:10.0.4 .
+docker build -f evals/Dockerfile.issue7 --target wordpress -t woo-issue19-wp:11.2.2 .
+docker build -f evals/Dockerfile.issue7 --target cli -t woo-issue19-cli:11.2.2 .
 docker build -t woo-rag-api:issue7 chatbot
 docker pull mariadb@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4
 docker pull chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6
@@ -24,6 +24,8 @@ riusato immagini locali, senza build o download. Il runner risolve i tag a ID
 immutabili e li registra nel JSON del run. Il flag aggiunge verifiche al runner
 già usato dalla #19, mantenendone il comportamento ordinario senza flag.
 Non occorrono file o script da vecchie directory `/tmp`.
+I comandi sopra seguono la versione corrente (WooCommerce 11.2.2); i risultati
+storici sotto riguardano la 10.0.4.
 
 Ogni run crea un progetto `woo-issue19-<uuid>`, rete **internal**, quattro volumi
 nuovi (`db`, `wp`, `chroma`, `state`), nessuna porta pubblicata. Verifica prima
