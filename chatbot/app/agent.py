@@ -44,7 +44,7 @@ from app.resilience import (
     provider_call,
     tool_failure_message,
 )
-from app.tools.catalog import CatalogService
+from app.tools.catalog import CatalogService, ProductSearch
 from app.tools.orders import OrderService
 
 BASE_PROMPT = """Sei l'assistente clienti di un negozio online WooCommerce.
@@ -201,7 +201,22 @@ def build_toolset(
     async def elenco_prodotti() -> str:
         return await shop.list_products()
 
+    async def cerca_prodotti(**filters: Any) -> str:
+        return (await shop.search_products(**filters)).model_dump_json()
+
     tools = [
+        StructuredTool.from_function(
+            coroutine=cerca_prodotti,
+            name="cerca_prodotti",
+            description=(
+                "Cerca prodotti pubblicati e visibili con testo, categoria (nome o slug), "
+                "prezzo e pagina. Per consigli/regali usa max_price per il budget e "
+                "stock_status=instock (default). Prezzi nella valuta del negozio, letti live. "
+                "Per prodotti variabili considera solo le varianti verificate, non il prezzo "
+                "del padre. may_have_more segnala che la pagina non è esaustiva."
+            ),
+            args_schema=ProductSearch,
+        ),
         StructuredTool.from_function(
             coroutine=elenco_prodotti,
             name="elenco_prodotti",
