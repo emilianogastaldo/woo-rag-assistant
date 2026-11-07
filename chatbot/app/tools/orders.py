@@ -9,10 +9,15 @@ Sicurezza (vedi CLAUDE.md):
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+from app.config import settings
 from app.resilience import FailureKind, RecoverableFailure
+from app.tools.payloads import validate_rows
 from app.tools.woo_client import WooClient, shared_woo_client
 
 ORDER_NOT_FOUND = (
@@ -21,7 +26,41 @@ ORDER_NOT_FOUND = (
     "verificare il numero."
 )
 
-NO_ORDERS = "L'account non ha ordini registrati."
+MAX_SEARCH_PAGES = 5
+SEARCH_PAGE_SIZE = 20
+SEARCH_LIMIT = "Ricerca limitata ai 100 ordini più recenti dell'account; contatta l'assistenza."
+
+
+class OrderLookup(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    numero_ordine: (
+        Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[\w.-]+$")]
+        | Annotated[int, Field(gt=0)]
+    ) = Field(description="Numero pubblico esatto come stringa; intero solo per ID interno legacy")
+
+
+class OrderList(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    date_from: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    date_to: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    page: int = Field(default=1, ge=1, le=50)
+    limit: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("date_from", "date_to")
+    @classmethod
+    def valid_calendar_date(cls, value):
+        if value is not None:
+            parsed = date.fromisoformat(value)
+            if parsed.year in {1, 9999}:
+                raise ValueError("date year must be between 0002 and 9998")
+        return value
+
+    @model_validator(mode="after")
+    def ordered_dates(self):
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must be <= date_to")
+        return self
+
 
 # Convenzione del negozio: questo metadata viene scritto dall'integrazione di
 # tracking soltanto dopo la conferma di consegna del corriere. WooCommerce non
@@ -116,33 +155,80 @@ class OrderService:
         self._woo = client or shared_woo_client()
 
     def _belongs_to_customer(self, order: dict[str, Any]) -> bool:
-        return int(order.get("customer_id", 0)) == self._customer_id
+        return order.get("customer_id") == self._customer_id
 
-    async def get_order(self, order_number: int) -> str:
+    async def get_order(self, order_number: str | int) -> str:
         try:
-            wanted = int(order_number)
-        except (TypeError, ValueError):
+            wanted = OrderLookup(numero_ordine=order_number).numero_ordine
+        except ValidationError:
             return ORDER_NOT_FOUND
 
-        rows = await self._woo.get_json(
-            "orders",
-            {"customer": self._customer_id, "include": wanted, "per_page": 1},
-        )
-        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
-            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
-        for order in rows or []:
-            if int(order.get("id", 0)) == wanted and self._belongs_to_customer(order):
-                return format_order(order)
-        return ORDER_NOT_FOUND
+        if isinstance(wanted, int):
+            rows = validate_rows("orders", await self._woo.get_json(
+                "orders", {"customer": self._customer_id, "include": wanted, "per_page": 1},
+            ))
+            matches = [o for o in rows if o["id"] == wanted and self._belongs_to_customer(o)]
+            return format_order(matches[0]) if len(matches) == 1 else ORDER_NOT_FOUND
 
-    async def list_orders(self, limit: int = 5) -> str:
-        rows = await self._woo.get_json(
-            "orders",
-            {"customer": self._customer_id, "per_page": limit, "orderby": "date", "order": "desc"},
-        )
-        if not isinstance(rows, list) or any(not isinstance(order, dict) for order in rows):
-            raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
-        owned = [order for order in rows or [] if self._belongs_to_customer(order)]
-        if not owned:
-            return NO_ORDERS
-        return "\n\n".join(format_order(order) for order in owned)
+        matches = {}
+        for page in range(1, MAX_SEARCH_PAGES + 1):
+            rows = validate_rows("orders", await self._woo.get_json("orders", {
+                "customer": self._customer_id, "per_page": SEARCH_PAGE_SIZE,
+                "page": page, "orderby": "date", "order": "desc",
+            }))
+            if len(rows) > SEARCH_PAGE_SIZE:
+                raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
+            for order in rows:
+                if self._belongs_to_customer(order) and order.get("number") == wanted:
+                    matches[order["id"]] = order
+            if len(matches) > 1:
+                return "Numero d'ordine ambiguo nell'account; contatta l'assistenza."
+            if len(rows) < SEARCH_PAGE_SIZE:
+                break
+        else:
+            return ORDER_NOT_FOUND + "\n" + SEARCH_LIMIT
+        return format_order(next(iter(matches.values()))) if matches else ORDER_NOT_FOUND
+
+    async def list_orders(self, limit: int = 5, *, date_from: str | None = None,
+                          date_to: str | None = None, page: int = 1) -> str:
+        query = OrderList(limit=limit, date_from=date_from, date_to=date_to, page=page)
+        params = {"customer": self._customer_id, "per_page": query.limit, "page": query.page,
+                  "orderby": "date", "order": "desc", "dates_are_gmt": "true"}
+        zone = ZoneInfo(settings.wc_order_timezone)
+        for value, key, boundary, offset in (
+            (query.date_from, "after", time.min, -1),
+            (query.date_to, "before", time(23, 59, 59), 1),
+        ):
+            if value:
+                local = datetime.combine(date.fromisoformat(value), boundary, tzinfo=zone)
+                # WooCommerce before/after are exclusive; widen by one second for whole days.
+                bound = local.astimezone(UTC) + timedelta(seconds=offset)
+                params[key] = bound.isoformat(timespec="seconds").removesuffix("+00:00")
+        rows = validate_rows("orders", await self._woo.get_json("orders", params))
+        owned = []
+        for order in rows:
+            if not self._belongs_to_customer(order):
+                continue
+            if query.date_from or query.date_to:
+                created = _parse_datetime(order.get("date_created_gmt"))
+                if created:
+                    created = (created if created.tzinfo else
+                               created.replace(tzinfo=UTC)).astimezone(zone)
+                else:
+                    created = _parse_datetime(order.get("date_created"))
+                    if created and created.tzinfo:
+                        created = created.astimezone(zone)
+                if not created:
+                    raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
+                local_date = created.date().isoformat()
+                if ((query.date_from and local_date < query.date_from)
+                        or (query.date_to and local_date > query.date_to)):
+                    continue
+            owned.append(order)
+        result = ("\n\n".join(format_order(order) for order in owned[:query.limit]) if owned else
+                  "Nessun ordine trovato nei filtri e nella pagina richiesti.")
+        result += f"\n\nPagina {query.page}; date nel fuso {settings.wc_order_timezone}."
+        if len(rows) >= query.limit:
+            result += (" Risultati potenzialmente parziali; richiedi la pagina successiva."
+                       if query.page < 50 else " Limite di 50 pagine raggiunto; restringi le date.")
+        return result
