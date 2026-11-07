@@ -118,6 +118,30 @@ def verify_token(token: str) -> str:
     return data["sub"]
 
 
+def bridge_rate_identity(assertion: str) -> str:
+    """Verify a quota-only assertion; it never authenticates a Woo customer."""
+    if not settings.wrag_bridge_secret or len(assertion) > 512:
+        raise SessionError("attestazione visitatore non valida")
+    try:
+        payload_b64, signature = assertion.split(".", 1)
+        payload = _b64decode(payload_b64)
+        expected = _signature(b"rate-limit:" + payload, settings.wrag_bridge_secret)
+        if not signature.isascii() or not hmac.compare_digest(expected, signature):
+            raise ValueError
+        data = json.loads(payload)
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get("sub"), str)
+            or not re.fullmatch(r"(?:guest|auth):[a-f0-9]{64}", data["sub"])
+            or type(data.get("exp")) is not int
+            or not time.time() < data["exp"] <= time.time() + 60
+        ):
+            raise ValueError
+    except (ValueError, binascii.Error, UnicodeDecodeError, RecursionError) as exc:
+        raise SessionError("attestazione visitatore non valida") from exc
+    return data["sub"]
+
+
 def conversation_identity(token: str) -> str:
     """WP renews its short assertion each turn; isolate by its signed login session."""
     if token.startswith("wp."):

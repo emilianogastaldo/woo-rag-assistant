@@ -66,3 +66,4 @@ def isolated_security_state():
 
     app.state.conversations = MemoryConversationStore()
     app.state.rate_limiter = MemoryRateLimiter()
+    app.state.global_rate_limiter = MemoryRateLimiter()
