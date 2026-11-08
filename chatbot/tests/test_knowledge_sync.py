@@ -76,6 +76,7 @@ async def test_product_corpus_filters_visibility_and_excludes_live_fields(monkey
     woo.get_all.return_value = [
         {"name": "Public", "description": "Description", "price": "99.99", "stock_quantity": 999},
         {"name": "Hidden", "description": "Secret", "catalog_visibility": "hidden"},
+        {"name": "Private", "description": "Secret", "status": "private"},
     ]
     woo.__aenter__.return_value = woo
     monkeypatch.setattr(ingest, "WooClient", lambda: woo)

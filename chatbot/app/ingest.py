@@ -40,7 +40,8 @@ async def fetch_product_docs() -> list[Document]:
         )
     docs: list[Document] = []
     for p in products:
-        if p.get("catalog_visibility", "visible") not in {"visible", "catalog"}:
+        if (p.get("status", "publish") != "publish"
+                or p.get("catalog_visibility", "visible") not in {"visible", "catalog"}):
             continue
         body = "\n\n".join(
             filter(
