@@ -128,6 +128,8 @@ async def test_variable_product_uses_only_current_matching_variants():
             {"id": 12, "status": "publish", "price": "51", "stock_status": "instock"},
             {"id": 13, "status": "publish", "price": "1", "stock_status": "outofstock"},
             {"id": 14, "status": "private", "price": "1", "stock_status": "instock"},
+            {"id": 15, "status": "publish", "price": "1", "stock_status": "instock",
+             "post_password": "private-password"},
         ],
     })
     result = await CatalogService(woo).search_products(max_price=50)
@@ -140,9 +142,13 @@ async def test_variable_product_uses_only_current_matching_variants():
     assert len(woo.calls) == 2
 
 
-async def test_variable_unknown_or_nonmatching_variants_are_not_recommended():
+@pytest.mark.parametrize("variations", [[], [
+    {"id": 11, "status": "publish", "price": "1", "stock_status": "instock",
+     "post_password": "private-password"},
+]])
+async def test_variable_unknown_or_nonmatching_variants_are_not_recommended(variations):
     woo = FakeWooClient({"products": [make_product(type="variable")],
-                         "products/1/variations": []})
+                         "products/1/variations": variations})
     result = await CatalogService(woo).search_products(max_price=50)
     assert result.products == []
 
@@ -172,6 +178,25 @@ async def test_sku_then_name_lookup_stays_compatible_and_filters_hidden(monkeypa
     assert woo.calls[1][1]["search"] == "prod"
     assert "19.90 USD" in result
     assert "Prodotto 2" not in result
+
+
+@pytest.mark.parametrize("method", ["list_products", "check_availability", "search_products"])
+@pytest.mark.parametrize("include_public", [False, True])
+async def test_password_protected_products_never_reach_catalog_output(method, include_public):
+    protected = make_product(2, type="variable", post_password="private-password",
+                             name="Private product", sku="PRIVATE-SKU",
+                             description="Private description")
+    woo = FakeWooClient({"products": [protected] + (
+        [make_product(post_password="")] if include_public else [])})
+    service = CatalogService(woo)
+    result = (await service.check_availability("PRIVATE-SKU") if method == "check_availability"
+              else await getattr(service, method)())
+    output = result.model_dump_json() if method == "search_products" else result
+    assert "Private" not in output
+    assert "PRIVATE-SKU" not in output
+    assert "private-password" not in output
+    assert ("Prodotto 1" in output) == include_public
+    assert all(path == "products" for path, _ in woo.calls)
 
 
 def test_currency_config_is_an_iso_code():

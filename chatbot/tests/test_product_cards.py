@@ -45,6 +45,19 @@ async def test_gift_cards_use_current_live_results_with_budget_and_default_insto
     assert active.verified_products.get() is None
 
 
+@pytest.mark.parametrize("include_public", [False, True])
+async def test_password_protected_products_never_create_cards_or_tool_evidence(include_public):
+    active = toolset(FakeWooClient({"products": [
+        make_product(2, post_password="private-password", name="Private product"),
+    ] + ([make_product(post_password="")] if include_public else [])}))
+    llm = FakeLLM(search_call(), AIMessage(content="Risultati verificati."))
+    result = await answer("regalo", toolset=active, llm=llm)
+    assert [p.id for p in result.products] == ([1] if include_public else [])
+    evidence = str(llm.seen[-1][-1].content)
+    assert "Private product" not in evidence
+    assert "private-password" not in evidence
+
+
 async def test_model_text_and_history_never_create_cards_between_turns():
     active = toolset(FakeWooClient({"products": [make_product()]}))
     first = await answer("regalo", toolset=active, llm=FakeLLM(
