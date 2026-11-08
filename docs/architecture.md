@@ -431,8 +431,17 @@ transazione SQLite. La copia in memoria viene aggiornata solo dopo il commit su
 disco: un errore restituisce 503 e conserva la history precedente. Dopo riavvio si
 ricaricano owner, messaggi redatti, turni e scadenza assoluta (orologio Unix, non
 monotono); il flag busy non viene salvato, così un arresto non blocca la ripresa.
-Il TTL non viene rinnovato. Le righe scadute si eliminano all'avvio/acquisizione,
-con `secure_delete` attivo; i backup hanno una retention separata da gestire.
+Il TTL non viene rinnovato. Le righe scadute si eliminano all'avvio/acquisizione
+e periodicamente anche senza traffico (default 60 s), con `secure_delete` attivo.
+Il task di lifespan viene cancellato prima di chiudere lo store; errori SQLite
+producono un evento redatto e la pulizia riprova al ciclo seguente. Un turno che
+finisce dopo il TTL non riscrive i messaggi già eliminati. Il contesto di un turno
+ancora attivo resta in memoria fino alla sua conclusione/deadline.
+La cancellazione esplicita usa `DELETE /chat/{id}`: stessa identità della chat,
+204 neutro per ignoto/altrui, 409 solo per la propria conversazione occupata.
+Il ponte WP usa la stessa autorizzazione cookie/nonce e attesta la quota. Non
+esiste cancellazione cliente Woo o ordine. Backup e ripristini hanno una retention
+separata da gestire, descritta nel [runbook operativo](operations.md).
 
 Un lock POSIX per tutta la vita dello store impone un solo worker per database;
 Compose usa un volume dedicato `conversation_state`. La history sopravvive al
@@ -443,6 +452,22 @@ store, quote e controllo della concorrenza condivisi. SQLite non cifra i messagg
 il file viene creato con permessi 0600 e il volume va protetto e incluso nei backup
 solo secondo la retention delle conversazioni. Non vengono archiviati token,
 customer ID, risultati tool o contenuti grezzi del provider.
+
+La #34 aggiunge nello stesso database `daily_usage(day, units)`. Una transazione
+`BEGIN IMMEDIATE` riserva unità prima di ogni tentativo generazione o embedding
+di retrieval in `/chat`. I retry prenotano nuovamente; errori, cancellazioni e
+usage mancante non rimborsano unità. `PROVIDER_DAILY_UNIT_LIMIT=0` disabilita il
+tetto ma conserva il conteggio; un valore positivo blocca prima della chiamata
+che lo supererebbe. Un errore DB impedisce la chiamata anche senza tetto.
+Generazione usa la stessa stima conservativa per turno, embedding i byte UTF-8
+della query. Il giorno è UTC e il contatore sopravvive al riavvio. Ingestion,
+eval e chiamate Python fuori dal lifecycle HTTP restano fuori da questo perimetro.
+Nessuna tariffa è implicita: unità e token non sono un tetto monetario.
+`usage_scope` isola contatori runtime tramite ContextVar; i log allowlisted
+contengono tentativi, unità, token modello riportati e contatori di usage mancante.
+`aembed_query` non espone usage, quindi viene contato come mancante. Gli esiti
+`fallback`/`uncited` misurano le sole astensioni deterministiche; `answered` non è
+una certificazione semantica della risposta.
 Cache email→ID: TTL fisso monotono, accesso LRU e rimozione prima dell'inserimento,
 con capienza globale per processo. Nessuna cache di errori o clienti inesistenti.
 

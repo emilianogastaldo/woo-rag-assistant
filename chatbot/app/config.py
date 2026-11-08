@@ -109,6 +109,7 @@ class Settings(BaseSettings):
     demo_enabled: bool = False
     conversation_db_path: str = "state/conversations.sqlite3"
     conversation_ttl_seconds: int = Field(default=1800, ge=1)
+    conversation_purge_interval_seconds: float = Field(default=60, gt=0, le=3600)
     conversation_capacity: int = Field(default=1000, ge=1)
     conversation_max_turns: int = Field(default=20, ge=1, le=100)
     message_max_bytes: int = Field(default=4000, ge=1, le=16000)
@@ -116,6 +117,8 @@ class Settings(BaseSettings):
     chat_body_max_bytes: int = Field(default=24000, ge=256, le=200000)
     model_context_max_bytes: int = Field(default=32000, ge=1, le=200000)
     model_token_budget: int = Field(default=100000, ge=1, le=1000000)
+    # Persistent generation + retrieval-embedding reservations per UTC day; 0 = no cap.
+    provider_daily_unit_limit: int = Field(default=0, ge=0)
     model_max_output_tokens: int = Field(default=512, ge=1, le=4096)
     tool_output_max_bytes: int = Field(default=12000, ge=1, le=100000)
     customer_cache_ttl_seconds: int = Field(default=300, ge=1)

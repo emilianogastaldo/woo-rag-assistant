@@ -90,6 +90,18 @@ function wrag_chat($request) {
             || !preg_match('/^[A-Za-z0-9_-]{43}$/D', $body['conversation_id'])))) {
         return new WP_Error('wrag_request', 'Richiesta non valida', ['status' => 422]);
     }
+    return wrag_proxy('/chat', 'POST', $body);
+}
+
+function wrag_delete($request) {
+    $id = $request->get_param('conversation_id');
+    if (!is_string($id) || !preg_match('/^[A-Za-z0-9_-]{43}$/D', $id)) {
+        return new WP_Error('wrag_request', 'Richiesta non valida', ['status' => 422]);
+    }
+    return wrag_proxy('/chat/' . $id, 'DELETE');
+}
+
+function wrag_proxy($path, $method, $body = null) {
     $headers = [
         'Content-Type' => 'application/json',
         'X-WRAG-Visitor' => wrag_visitor_assertion(),
@@ -100,9 +112,10 @@ function wrag_chat($request) {
         && preg_match('/^[A-Za-z0-9_.-]{1,4096}$/D', $_COOKIE['wrag_guest'])) {
         $headers['Cookie'] = 'wrag_guest=' . $_COOKIE['wrag_guest'];
     }
-    $upstream = wp_remote_post(rtrim(getenv('WRAG_BACKEND_URL'), '/') . '/chat', [
+    $upstream = wp_remote_request(rtrim(getenv('WRAG_BACKEND_URL'), '/') . $path, [
+        'method' => $method,
         'headers' => $headers,
-        'body' => wp_json_encode($body),
+        'body' => $body === null ? '' : wp_json_encode($body),
         'timeout' => 35,
         'redirection' => 0,
         'limit_response_size' => 65536,
@@ -112,7 +125,8 @@ function wrag_chat($request) {
     }
     $data = json_decode(wp_remote_retrieve_body($upstream), true);
     $status = wp_remote_retrieve_response_code($upstream);
-    if (!is_array($data) || $status < 200 || $status > 599) {
+    if (($status !== 204 || $method !== 'DELETE')
+        && (!is_array($data) || $status < 200 || $status > 599)) {
         return new WP_Error('wrag_upstream', 'Assistente non disponibile', ['status' => 502]);
     }
     $response = new WP_REST_Response($data, $status);
@@ -137,6 +151,9 @@ add_action('rest_api_init', static function () {
     ]);
     register_rest_route('woo-rag/v1', '/chat', [
         'methods' => 'POST', 'callback' => 'wrag_chat', 'permission_callback' => 'wrag_permission',
+    ]);
+    register_rest_route('woo-rag/v1', '/chat/(?P<conversation_id>[A-Za-z0-9_-]{43})', [
+        'methods' => 'DELETE', 'callback' => 'wrag_delete', 'permission_callback' => 'wrag_permission',
     ]);
 });
 

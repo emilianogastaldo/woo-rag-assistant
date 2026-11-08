@@ -426,6 +426,11 @@ Per ospiti il server emette un cookie firmato `wrag_guest`, HttpOnly, SameSite=L
 Il widget e l'API devono essere sullo stesso **site**; per domini diversi usare un
 reverse proxy sul dominio del negozio. Il solo conversation ID non autorizza accesso.
 
+`DELETE /chat/{conversation_id}` cancella soltanto la conversazione dell'identità
+corrente, con lo stesso bearer o cookie ospite. Restituisce 204 anche per ID ignoti
+o altrui; 409 se la propria chat ha un turno attivo. È disponibile anche tramite
+il bridge WordPress con cookie e nonce nativi. Non modifica ordini né dati Woo.
+
 `APP_ENV=production` rifiuta segreti vuoti, predefiniti o inferiori a 32 caratteri e
 rifiuta `DEMO_ENABLED=true`. Generare un segreto casuale; `.env.example` è solo un
 template di sviluppo. `/demo/login` è assente anche da OpenAPI quando disabilitato;
@@ -446,6 +451,7 @@ nessuna credenziale viene inclusa nelle risposte chat.
 | History: 16000 byte UTF-8 | Rimozione delle coppie user/assistant più vecchie; TTL non si rinnova |
 | Output tool: 12000 byte; contesto modello: 32000 byte | Tool troncato prima della delimitazione JSON; contesto eccedente: fallback |
 | Budget modello: 100000 unità conservative per turno | Prenota byte UTF-8 serializzati + overhead/schema + massimo output prima di ogni chiamata/retry; nessun rimborso |
+| `PROVIDER_DAILY_UNIT_LIMIT=0` | Tetto giornaliero disabilitato; impostare un valore positivo per limitare le unità aggregate persistenti di modello e embedding della chat |
 | Output modello: 512 token per chiamata | Limite inviato al provider, incluso nella prenotazione |
 | Cache email→ID: TTL fisso 300 s, capienza 1000 | Scadenza e rimozione LRU; nessun customer ID entra nel contesto |
 | `/chat`: 20 richieste / 60 s per visitatore attestato o peer diretto, massimo 10000 chiavi | Finestra fissa; anche richieste invalide consumano quota; 429 con `Retry-After` in secondi |
@@ -466,11 +472,18 @@ li conserva in memoria, quindi ricaricare la pagina avvia una nuova chat.
 
 Avviare un solo worker: un lock POSIX sul database impedisce a due processi di
 usare contemporaneamente lo stesso store. Cache e rate limiter restano in memoria
-e si azzerano al riavvio. Le conversazioni scadute vengono eliminate all'avvio e
-alla successiva acquisizione; un turno interrotto non viene salvato. SQLite contiene
+e si azzerano al riavvio. Le conversazioni scadute vengono eliminate all'avvio,
+all'acquisizione e ogni 60 s anche senza chat (`CONVERSATION_PURGE_INTERVAL_SECONDS`);
+un turno interrotto o terminato dopo il TTL non viene salvato. SQLite contiene
 solo messaggi utente e risposte finali già redatti, più il digest dell'owner; il
 file non è cifrato. Proteggere volume e backup come dati di conversazione. Il file
 e il lock sono creati con permessi `0600`; un errore di salvataggio restituisce 503.
+
+Nello stesso file SQLite, `daily_usage` conserva solo giorno UTC e unità aggregate:
+la prenotazione avviene prima di ogni tentativo provider, incluso retry, senza
+rimborsi. I log runtime espongono token modello riportati e usage mancante
+esplicito; nessun costo monetario viene dedotto automaticamente.
+[Budget, cancellazione e gestione backup](docs/operations.md).
 
 Il rate limit diretto usa il peer di rete, non header forniti dal client. Il Compose avvia
 Uvicorn con `--no-proxy-headers`: dietro proxy, tutti i client condividono la quota

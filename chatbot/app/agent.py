@@ -46,6 +46,7 @@ from app.resilience import (
 )
 from app.tools.catalog import CatalogService
 from app.tools.orders import OrderService
+from app.usage import record_model_usage, reserve_provider_units
 
 BASE_PROMPT = """Sei l'assistente clienti di un negozio online WooCommerce.
 Rispondi in italiano, in modo cortese, conciso e concreto. Oggi è il {today}.
@@ -318,11 +319,13 @@ async def _invoke_model(
         if size > settings.model_context_max_bytes or cost > token_budget[0]:
             raise BudgetExhausted()
         token_budget[0] -= cost
+        reserve_provider_units("model", cost)
         if trace is not None:
             trace.llm_calls += 1
         response = await model.ainvoke(messages)
         if not isinstance(response, AIMessage):
             raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE, retryable=True)
+        record_model_usage(response.usage_metadata)
         return response
 
     return await provider_call("model", invoke)
