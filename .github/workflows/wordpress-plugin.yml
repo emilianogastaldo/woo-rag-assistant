@@ -1,0 +1,25 @@
+name: WordPress plugin
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  plugin:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP bridge and settings boundaries
+        run: |
+          php -l wordpress/woo-rag-auth.php
+          php -l wordpress/woo-rag-admin.php
+          php wordpress/tests/plugin.php
+      - name: Widget DOM and keyboard behavior
+        run: node wordpress/tests/widget.mjs
+      - name: Reproducible plugin archive
+        run: python3 -m unittest discover -s scripts -p 'test_build_wordpress_plugin.py'
+      - name: Build plugin archive
+        run: python3 scripts/build_wordpress_plugin.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-plugin
+          path: dist/woo-rag-assistant.zip

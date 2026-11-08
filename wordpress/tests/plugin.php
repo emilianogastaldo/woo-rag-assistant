@@ -49,6 +49,7 @@ ob_start(); wrag_settings_page(); check(ob_get_clean() === '', 'no settings page
 $admin = true;
 try { $hooks['admin_post_wrag_diagnostic'][0](); throw new Exception('should check nonce'); }
 catch (Exception $error) { check($error->getMessage() === 'nonce check reached:wrag_diagnostic', 'diagnostic CSRF checked before network'); }
+$upstream['status'] = 200;
 $upstream['body'] = '{"secret":"not reflected"}';
 check(wrag_diagnostic() === 'ready', 'readiness GET succeeds without model');
 check($forwarded[0] === 'https://public.example/api/ready' && !isset($forwarded[1]['headers']), 'diagnostic sends no auth/secret');
