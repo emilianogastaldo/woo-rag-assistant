@@ -39,7 +39,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_NAME: wordpress
@@ -63,7 +63,7 @@ services:
   chromadb:
     image: chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - chroma_data:/data
     environment:
@@ -85,7 +85,7 @@ services:
       chromadb:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL}
@@ -127,6 +127,7 @@ services:
       CUSTOMER_CACHE_TTL_SECONDS: ${CUSTOMER_CACHE_TTL_SECONDS:-300}
       CUSTOMER_CACHE_CAPACITY: ${CUSTOMER_CACHE_CAPACITY:-1000}
       RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-20}
+      RATE_LIMIT_GLOBAL_REQUESTS: ${RATE_LIMIT_GLOBAL_REQUESTS:-200}
       RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
       RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-10000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:8000}

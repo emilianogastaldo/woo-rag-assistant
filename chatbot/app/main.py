@@ -31,6 +31,7 @@ from app.agent import FALLBACK_REPLY, answer
 from app.auth.session import (
     DEMO_CUSTOMERS,
     SessionError,
+    bridge_rate_identity,
     conversation_identity,
     issue_token,
     resolve_session,
@@ -58,6 +59,7 @@ async def lifespan(application: FastAPI):
     settings.validate_security()
     application.state.conversations = SQLiteConversationStore(settings.conversation_db_path)
     application.state.rate_limiter = MemoryRateLimiter()
+    application.state.global_rate_limiter = MemoryRateLimiter()
     logging.getLogger("uvicorn.access").disabled = True
     operations = logging.getLogger("woo_rag.operations")
     if not operations.handlers:
@@ -144,6 +146,7 @@ def _bearer(authorization: str | None) -> str | None:
 # Also initialized here for ASGI clients that intentionally skip lifespan.
 app.state.conversations = MemoryConversationStore()
 app.state.rate_limiter = MemoryRateLimiter()
+app.state.global_rate_limiter = MemoryRateLimiter()
 
 
 @app.exception_handler(RequestValidationError)
@@ -163,15 +166,27 @@ async def request_correlation(request: Request, call_next):
     with correlation(request_id, uuid.uuid4().hex):
         started = time.perf_counter()
         if request.url.path == "/chat":
-            # Use socket peer only: forwarded headers are not trusted here.
+            # Only the signed bridge assertion can replace the socket peer quota.
             peer = request.client.host if request.client else "unknown"
-            retry = request.app.state.rate_limiter.check(hashlib.sha256(peer.encode()).hexdigest())
+            identity = "peer:" + hashlib.sha256(peer.encode()).hexdigest()
+            invalid_assertion = False
+            assertion = request.headers.get("X-WRAG-Visitor")
+            if assertion is not None:
+                try:
+                    identity = "bridge:" + bridge_rate_identity(assertion)
+                except SessionError:
+                    invalid_assertion = True
+            retry = request.app.state.global_rate_limiter.check(
+                "global", limit=settings.rate_limit_global_requests
+            ) or request.app.state.rate_limiter.check(identity)
             if retry:
                 return JSONResponse(
                     status_code=429,
                     content={"detail": "Troppe richieste"},
                     headers={"Retry-After": str(retry)},
                 )
+            if invalid_assertion:
+                return JSONResponse(status_code=401, content={"detail": "Visitatore non valido"})
             body = bytearray()
             async for chunk in request.stream():
                 body.extend(chunk)
