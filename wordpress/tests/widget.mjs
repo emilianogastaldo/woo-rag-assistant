@@ -15,7 +15,7 @@ class Element {
 }
 const document = {
   head: new Element('head'), body: new Element('body'),
-  currentScript: { dataset: { api: 'https://store.test/wp-json/woo-rag/v1', wpNonce: 'native-nonce' } },
+  currentScript: { dataset: { api: 'https://store.test/wp-json/woo-rag/v1', wpNonce: 'native-nonce', title: '<img onerror=alert(1)>', color: '#ffffff', position: 'left' } },
   createElement: tag => new Element(tag), createTextNode: text => ({ textContent: text }),
 };
 const events = {};
@@ -71,6 +71,9 @@ const form = find(node => node.tag === 'form'), input = find(node => node.tag ==
 const send = find(node => node.type === 'submit');
 const submit = async message => { input.value = message; await form.events.submit({ preventDefault() {} }); };
 const tick = () => new Promise(resolve => setImmediate(resolve));
+assert.equal(find(node => node.tag === 'strong').textContent, '<img onerror=alert(1)>');
+assert.ok(document.head.children[0].textContent.includes('color:#000'));
+assert.ok(document.head.children[0].textContent.includes('left:24px;right:auto'));
 assert.equal(launcher['aria-controls'], panel.id);
 assert.equal(panel.role, 'dialog');
 assert.equal(panel['aria-labelledby'], find(node => node.tag === 'strong').id);
@@ -231,3 +234,13 @@ assert.ok(text(log).includes('Sessione scaduta'));
 await submit('after-expired-response');
 assert.equal(requests.at(-1).conversation_id, null);
 console.log('PASS: WP widget keyboard/focus, live status, safe sources/cards/errors, login/logout/session isolation and stale reply; no browser bearer/storage');
+
+for (const dataset of [{ color: 'red;display:none', position: 'bad' }, {}]) {
+  const isolated = { ...document, head: new Element('head'), body: new Element('body'), currentScript: { dataset } };
+  vm.runInNewContext(readFileSync(new URL('../../widget/chat.js', import.meta.url), 'utf8'), {
+    document: isolated, window: { addEventListener() {} }, fetch: async () => result(200, {}), URL,
+  });
+  assert.ok(!isolated.head.children[0].textContent.includes('red;display:none'));
+  assert.ok(!isolated.head.children[0].textContent.includes('left:24px;right:auto'));
+  assert.ok(walk(isolated.body).some(node => node.textContent === 'Assistente del negozio'));
+}

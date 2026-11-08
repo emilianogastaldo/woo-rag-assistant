@@ -2,12 +2,37 @@
 /**
  * Plugin Name: Woo RAG authenticated bridge
  * Description: Same-origin chat proxy using the native WordPress login session.
+ * Version: 0.1.0
+ * Requires at least: 6.8
+ * Requires PHP: 8.2
+ * License: GPL-2.0-or-later
  */
 defined('ABSPATH') || exit;
 
+// The MU bridge wins when a packaged copy is also active.
+if (!function_exists('wrag_ready')) {
+
+function wrag_setting($key) {
+    $defaults = ['backend_url' => '', 'bridge_secret' => '', 'title' => 'Assistente del negozio',
+        'color' => '#315C49', 'position' => 'right'];
+    if (in_array($key, ['backend_url', 'bridge_secret'], true)) {
+        $override = getenv('WRAG_' . strtoupper($key));
+        if ($override !== false && $override !== '') {
+            return $override;
+        }
+    }
+    $options = get_option('wrag_options', []);
+    return $options[$key] ?? $defaults[$key];
+}
+
+function wrag_http_options() {
+    // Only the trusted server environment may opt into a private backend.
+    return ['redirection' => 0, 'reject_unsafe_urls' => !getenv('WRAG_BACKEND_URL')];
+}
+
 function wrag_ready() {
-    return strlen(trim((string) getenv('WRAG_BRIDGE_SECRET'))) >= 32
-        && getenv('WRAG_BACKEND_URL');
+    return strlen(trim((string) wrag_setting('bridge_secret'))) >= 32
+        && wrag_setting('backend_url');
 }
 
 function wrag_permission($request) {
@@ -30,7 +55,7 @@ function wrag_permission($request) {
 }
 
 function wrag_session_key() {
-    return hash_hmac('sha256', get_current_user_id() . ':' . wp_get_session_token(), getenv('WRAG_BRIDGE_SECRET'));
+    return hash_hmac('sha256', get_current_user_id() . ':' . wp_get_session_token(), wrag_setting('bridge_secret'));
 }
 
 function wrag_config() {
@@ -59,7 +84,7 @@ function wrag_backend_token() {
         return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     };
     return 'wp.' . $encode($payload) . '.'
-        . $encode(hash_hmac('sha256', $payload, getenv('WRAG_BRIDGE_SECRET'), true));
+        . $encode(hash_hmac('sha256', $payload, wrag_setting('bridge_secret'), true));
 }
 
 function wrag_visitor_assertion() {
@@ -68,14 +93,14 @@ function wrag_visitor_assertion() {
         : 'guest:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
     $payload = wp_json_encode([
         'sub' => (is_user_logged_in() ? 'auth:' : 'guest:')
-            . hash_hmac('sha256', $identity, getenv('WRAG_BRIDGE_SECRET')),
+            . hash_hmac('sha256', $identity, wrag_setting('bridge_secret')),
         'exp' => time() + 30,
     ]);
     $encode = static function ($value) {
         return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
     };
     return $encode($payload) . '.'
-        . $encode(hash_hmac('sha256', 'rate-limit:' . $payload, getenv('WRAG_BRIDGE_SECRET'), true));
+        . $encode(hash_hmac('sha256', 'rate-limit:' . $payload, wrag_setting('bridge_secret'), true));
 }
 
 function wrag_chat($request) {
@@ -100,11 +125,12 @@ function wrag_chat($request) {
         && preg_match('/^[A-Za-z0-9_.-]{1,4096}$/D', $_COOKIE['wrag_guest'])) {
         $headers['Cookie'] = 'wrag_guest=' . $_COOKIE['wrag_guest'];
     }
-    $upstream = wp_remote_post(rtrim(getenv('WRAG_BACKEND_URL'), '/') . '/chat', [
+    $upstream = wp_remote_post(rtrim(wrag_setting('backend_url'), '/') . '/chat', [
         'headers' => $headers,
         'body' => wp_json_encode($body),
         'timeout' => 35,
         'redirection' => 0,
+        'reject_unsafe_urls' => wrag_http_options()['reject_unsafe_urls'],
         'limit_response_size' => 65536,
     ]);
     if (is_wp_error($upstream)) {
@@ -144,8 +170,15 @@ add_action('wp_footer', static function () {
     if (!wrag_ready()) {
         return;
     }
-    $src = content_url('woo-rag-widget/chat.js');
-    printf('<script src="%s" data-api="%s" data-wp-nonce="%s"></script>',
+    $src = is_file(__DIR__ . '/widget/chat.js')
+        ? plugins_url('widget/chat.js', __FILE__) : content_url('woo-rag-widget/chat.js');
+    printf('<script src="%s" data-api="%s" data-wp-nonce="%s" data-title="%s" data-color="%s" data-position="%s"></script>',
         esc_url($src), esc_url(untrailingslashit(rest_url('woo-rag/v1'))),
-        esc_attr(wp_create_nonce('wp_rest')));
+        esc_attr(wp_create_nonce('wp_rest')), esc_attr(wrag_setting('title')),
+        esc_attr(wrag_setting('color')), esc_attr(wrag_setting('position')));
 });
+
+if (is_file(__DIR__ . '/woo-rag-admin.php')) {
+    require_once __DIR__ . '/woo-rag-admin.php';
+}
+}
