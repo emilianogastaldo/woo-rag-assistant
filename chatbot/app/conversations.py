@@ -16,6 +16,7 @@ from typing import Protocol
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from app.config import settings
+from app.resilience import BudgetExhausted
 
 
 class ConversationError(Exception):
@@ -38,6 +39,9 @@ class ConversationStore(Protocol):
     def acquire(self, conversation_id: str | None, owner: str) -> Conversation: ...
     def commit(self, conversation: Conversation, message: str, reply: str) -> None: ...
     def release(self, conversation: Conversation) -> None: ...
+    def reserve_usage(self, units: int, limit: int) -> None: ...
+    def purge_expired(self) -> None: ...
+    def delete(self, conversation_id: str, owner: str) -> None: ...
 
 
 class MemoryConversationStore:
@@ -46,8 +50,8 @@ class MemoryConversationStore:
         self.rows: dict[str, Conversation] = {}
 
     def acquire(self, conversation_id: str | None, owner: str) -> Conversation:
+        self.purge_expired()
         now = self.clock()
-        self.rows = {key: row for key, row in self.rows.items() if row.busy or row.expires > now}
         if conversation_id is not None:
             row = self.rows.get(conversation_id)
             if row is None or row.owner != owner or row.expires <= now:
@@ -67,6 +71,8 @@ class MemoryConversationStore:
         return row
 
     def commit(self, conversation: Conversation, message: str, reply: str) -> None:
+        if conversation.expires <= self.clock():
+            return
         conversation.turns += 1
         conversation.history.extend([HumanMessage(content=message), AIMessage(content=reply)])
         while (
@@ -76,6 +82,24 @@ class MemoryConversationStore:
 
     def release(self, conversation: Conversation) -> None:
         conversation.busy = False
+        if conversation.expires <= self.clock():
+            self.rows.pop(conversation.id, None)
+
+    def purge_expired(self) -> None:
+        now = self.clock()
+        self.rows = {key: row for key, row in self.rows.items() if row.busy or row.expires > now}
+
+    def delete(self, conversation_id: str, owner: str) -> None:
+        row = self.rows.get(conversation_id)
+        if row is None or row.owner != owner:
+            return
+        if row.busy:
+            raise ConversationError(409, "Conversazione occupata")
+        del self.rows[conversation_id]
+
+    def reserve_usage(self, units: int, limit: int) -> None:
+        if limit:
+            raise ConversationError(503, "Budget persistente non disponibile")
 
 
 class SQLiteConversationStore(MemoryConversationStore):
@@ -95,6 +119,9 @@ class SQLiteConversationStore(MemoryConversationStore):
                 db.execute("""CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY, owner TEXT NOT NULL, expires REAL NOT NULL,
                     turns INTEGER NOT NULL, history TEXT NOT NULL
+                )""")
+                db.execute("""CREATE TABLE IF NOT EXISTS daily_usage (
+                    day TEXT PRIMARY KEY, units INTEGER NOT NULL
                 )""")
                 db.execute("DELETE FROM conversations WHERE expires <= ?", (self.clock(),))
                 for cid, owner, expires, turns, history in db.execute(
@@ -118,12 +145,26 @@ class SQLiteConversationStore(MemoryConversationStore):
         except sqlite3.Error:
             raise ConversationError(503, "Conversazioni temporaneamente non disponibili") from None
 
-    def acquire(self, conversation_id: str | None, owner: str) -> Conversation:
+    def purge_expired(self) -> None:
         with self._database() as db:
             db.execute("DELETE FROM conversations WHERE expires <= ?", (self.clock(),))
-        return super().acquire(conversation_id, owner)
+        super().purge_expired()
+
+    def delete(self, conversation_id: str, owner: str) -> None:
+        row = self.rows.get(conversation_id)
+        if row is None or row.owner != owner:
+            return
+        if row.busy:
+            raise ConversationError(409, "Conversazione occupata")
+        with self._database() as db:
+            db.execute("DELETE FROM conversations WHERE id = ? AND owner = ?",
+                       (conversation_id, owner))
+        super().delete(conversation_id, owner)
 
     def commit(self, conversation: Conversation, message: str, reply: str) -> None:
+        if conversation.expires <= self.clock():
+            self.purge_expired()
+            return
         candidate = replace(conversation, history=list(conversation.history))
         super().commit(candidate, message, reply)
         with self._database() as db:
@@ -134,6 +175,21 @@ class SQLiteConversationStore(MemoryConversationStore):
             )
         conversation.history = candidate.history
         conversation.turns = candidate.turns
+
+    def reserve_usage(self, units: int, limit: int) -> None:
+        if type(units) is not int or units < 1:
+            raise ValueError("Usage reservation must be positive")
+        day = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
+        with self._database() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT units FROM daily_usage WHERE day = ?", (day,)).fetchone()
+            used = row[0] if row else 0
+            if limit and used + units > limit:
+                raise BudgetExhausted()
+            db.execute(
+                "INSERT INTO daily_usage VALUES (?, ?) "
+                "ON CONFLICT(day) DO UPDATE SET units = excluded.units", (day, used + units),
+            )
 
     def close(self) -> None:
         if self._lock is not None:

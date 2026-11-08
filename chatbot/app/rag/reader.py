@@ -13,6 +13,7 @@ from app.http_clients import current_provider_client
 from app.rag.store import get_embeddings
 from app.rag.versions import Registry, VersionError
 from app.resilience import FailureKind, RecoverableFailure, parse_retry_after, retry_call
+from app.usage import reserve_provider_units
 
 
 class KnowledgeReader:
@@ -86,7 +87,11 @@ class KnowledgeReader:
         # Each physical operation retries only itself, never the entire pipeline.
         from app.resilience import provider_call
 
-        vector = await provider_call("embedding", lambda: get_embeddings().aembed_query(query))
+        async def embed():
+            reserve_provider_units("embedding", max(1, len(query.encode())))
+            return await get_embeddings().aembed_query(query)
+
+        vector = await provider_call("embedding", embed)
         identifier = await self._collection()
         result = await self._request("POST", f"{identifier}/query", {
             "query_embeddings": [vector], "n_results": k,
