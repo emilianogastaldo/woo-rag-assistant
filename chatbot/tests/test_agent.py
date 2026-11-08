@@ -44,7 +44,7 @@ class FakeOrderService:
         self.asked.append(order_number)
         return "Ordine #22\nStato: completato (consegnato)"
 
-    async def list_orders(self, limit: int = 5) -> str:
+    async def list_orders(self, limit: int = 5, **filters) -> str:
         return "Ordine #22"
 
 
