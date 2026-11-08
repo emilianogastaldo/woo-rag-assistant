@@ -240,3 +240,27 @@ def test_cleanup_obsolete_valid_version_and_missing_remote_recovery(setup):
     client.delete_collection(orphan)
     registry.cleanup(client, orphan)
     assert not (registry.root / f"{orphan}.json").exists()
+
+
+def test_sync_snapshot_updates_and_removes_sources_then_rolls_back(setup, monkeypatch):
+    registry, client, embeddings = setup
+    docs = [Document(page_content="Old policy", metadata={
+        "source": "https://store.test/policy", "title": "Policy", "type": "page",
+    }), Document(page_content="Removed product", metadata={
+        "source": "https://store.test/product", "title": "Product", "type": "product",
+    })]
+
+    async def gather():
+        return docs
+
+    monkeypatch.setattr(ingest, "gather_documents", gather)
+    old = ingest.ingest(registry=registry, client=client, embeddings=embeddings)
+    docs[:] = [Document(page_content="Updated policy", metadata=docs[0].metadata)]
+    new = ingest.ingest(registry=registry, client=client, embeddings=embeddings)
+    assert registry.read_state() == {"active": new, "previous": old}
+    assert {r["metadata"]["source"] for r in registry.manifest(new)["records"]} == {
+        "https://store.test/policy"
+    }
+    assert all("Updated policy" in r["text"] for r in registry.manifest(new)["records"])
+    registry.rollback(client, old)
+    assert len(registry.manifest(registry.read_state()["active"])["records"]) == 2

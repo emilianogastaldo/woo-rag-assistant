@@ -146,17 +146,28 @@ class WooClient:
         await self.aclose()
 
     async def get_all(
-        self, path: str, params: dict | None = None, per_page: int = 100
+        self, path: str, params: dict | None = None, per_page: int = 100, max_pages: int = 20
     ) -> list[dict]:
-        """Recupera tutte le pagine di una risorsa paginata WooCommerce."""
+        """Bounded full snapshot: refuse truncation instead of promoting an incomplete corpus."""
         results: list[dict] = []
-        page = 1
-        while True:
+        seen: set[int] = set()
+        for page in range(1, max_pages + 1):
             response = await self.get(path, {**(params or {}), "per_page": per_page, "page": page})
-            batch = response.json()
+            batch = validate_rows(path, response.json())
+            if not isinstance(batch, list):
+                raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
+            for row in batch:
+                if (not isinstance(row, dict) or type(row.get("id")) is not int
+                        or row["id"] in seen):
+                    raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
+                seen.add(row["id"])
             results.extend(batch)
-            total_pages = int(response.headers.get("X-WP-TotalPages", "1") or "1")
-            if not batch or page >= total_pages:
-                break
-            page += 1
-        return results
+            total = response.headers.get("X-WP-TotalPages")
+            if total is not None:
+                if not total.isdigit() or int(total) > max_pages:
+                    raise ValueError("WooCommerce corpus exceeds configured page limit")
+                if page >= int(total):
+                    return results
+            elif len(batch) < per_page:
+                return results
+        raise ValueError("WooCommerce corpus exceeds configured page limit")

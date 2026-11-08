@@ -347,6 +347,8 @@ L’elenco generale usa `elenco_prodotti`, senza ricerca vettoriale: legge fino 
 su questi dati non hanno citazioni documentali (`sources: []`). Per descrizioni
 e caratteristiche si usa il RAG, per un nome/SKU specifico il tool disponibilità.
 
+Configurazione del corpus e job periodico opzionale: [sincronizzazione knowledge base](docs/knowledge-sync.md).
+
 ## Ingestion e deploy versionati
 
 L'ingestion costruisce una collection candidata con manifest deterministico,

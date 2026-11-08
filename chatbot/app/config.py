@@ -75,6 +75,30 @@ class Settings(BaseSettings):
     knowledge_state_dir: str = "/state/knowledge"
     embedding_dimensions: int = Field(default=1536, ge=1, le=65536)
 
+    # Corpus esplicito del singolo negozio; stringa CSV per configurazione env semplice.
+    knowledge_page_slugs: str = "spedizioni,resi-e-rimborsi,domande-frequenti"
+    knowledge_include_products: bool = True
+    knowledge_max_pages: int = Field(default=20, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_knowledge_selection(self):
+        import re
+
+        slugs = self.knowledge_page_slug_list
+        if len(slugs) > 200 or any(
+            not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,199}", slug) for slug in slugs
+        ):
+            raise ValueError("Invalid knowledge page slugs")
+        if not slugs and not self.knowledge_include_products:
+            raise ValueError("Select knowledge pages or products")
+        return self
+
+    @property
+    def knowledge_page_slug_list(self) -> list[str]:
+        return list(dict.fromkeys(
+            s.strip() for s in self.knowledge_page_slugs.split(",") if s.strip()
+        ))
+
     # RAG: numero di chunk recuperati e distanza massima (coseno, 0=identico)
     # oltre la quale un chunk è considerato non pertinente. Vedi docs DEC-005:
     # la soglia va calibrata con `evals/run_eval.py`.
