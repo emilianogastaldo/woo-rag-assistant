@@ -22,6 +22,7 @@ const events = {};
 let identity = 'guest', invalidNonce = false, nextConversation = 0;
 let pendingRelease, requestSent, pauseNext = false;
 let nextStatus = 200, nextSources = [], nextReply, failNext = false;
+let nextProducts;
 const owners = new Map(), requests = [];
 const result = (status, data) => ({ ok: status === 200, status, json: async () => data,
   headers: { get: name => name === 'Retry-After' ? '7' : null } });
@@ -43,8 +44,11 @@ async function fetch(url, options) {
   if (body.conversation_id && owners.get(body.conversation_id) !== identity) return result(404, {});
   const id = body.conversation_id || String(++nextConversation);
   owners.set(id, identity);
-  const response = result(nextStatus, { conversation_id: id, reply: nextReply || 'answer:' + body.message, sources: nextSources });
+  const data = { conversation_id: id, reply: nextReply || 'answer:' + body.message, sources: nextSources };
+  if (nextProducts !== undefined) data.products = nextProducts;
+  const response = result(nextStatus, data);
   nextStatus = 200; nextSources = []; nextReply = undefined;
+  nextProducts = undefined;
   if (pauseNext) {
     pauseNext = false;
     requestSent();
@@ -104,6 +108,8 @@ identity = 'native-session-B-second-login';
 await submit('new-login');
 assert.equal(requests.at(-1).conversation_id, null);
 pauseNext = true;
+nextProducts = [{ id: 8, name: 'private-card', url: 'https://store.test/private', price: '1',
+  currency: 'EUR', stock_status: 'instock', type: 'simple' }];
 const sent = new Promise(resolve => { requestSent = resolve; });
 const pending = submit('late-private');
 await sent;
@@ -123,6 +129,7 @@ assert.equal(form['aria-busy'], 'false');
 assert.equal(text(status), '');
 assert.equal(document.activeElement, launcher, 'completion of a closed chat does not steal focus');
 assert.ok(!text(log).includes('late-private'), 'discard response after native logout');
+assert.ok(!text(log).includes('private-card'), 'discard stale cards after native logout');
 assert.ok(text(document.body).includes('Sessione: ospite'));
 await submit('new-guest');
 assert.equal(requests.at(-1).conversation_id, null);
@@ -158,6 +165,51 @@ links.forEach(link => {
 });
 assert.ok(text(log).includes('<img src=x onerror=alert(1)>'), 'model markup remains text');
 assert.ok(!walk(log).some(node => ['img', 'script'].includes(node.tag)));
+nextProducts = [
+  { id: 1, name: '<svg onload=alert(1)>', url: 'https://store.test/product/1',
+    image: 'https://store.test/image.jpg', currency: 'GBP', price: '0',
+    stock_status: 'instock', type: 'simple' },
+  { id: 2, name: 'Missing data', url: 'javascript:alert(1)', image: 'data:image/svg+xml,<svg/>',
+    currency: 'EUR', price: '<img onerror=alert(1)>', stock_status: 'outofstock', type: 'simple' },
+  { id: 3, name: 'Variable', url: 'https://store.test/product/3',
+    image: 'https://user:password@store.test/private.jpg', currency: 'EUR', price: '999',
+    stock_status: 'instock', type: 'variable', variants_may_have_more: true,
+    variants: [{ id: 31, price: '49.00', stock_status: 'instock',
+      attributes: { '<img src=x>': '<script>unsafe</script>' } }] },
+];
+await submit('cards');
+const productBox = find(node => node.className === 'wrag-products');
+assert.equal(productBox.role, 'list');
+assert.ok(productBox['aria-label'].includes('Prodotti verificati'));
+assert.equal(productBox.children.length, 3);
+assert.ok(productBox.children.every(card => card.role === 'listitem'));
+const cardLinks = walk(productBox).filter(node => node.tag === 'a');
+assert.equal(cardLinks.length, 2, 'invalid URL is not a link');
+cardLinks.forEach(link => {
+  assert.ok(link.href.startsWith('https://store.test/product/'));
+  assert.equal(link.rel, 'noopener noreferrer');
+  assert.ok(link['aria-label'].includes('nuova scheda'), 'native links support keyboard navigation');
+});
+const images = walk(productBox).filter(node => node.tag === 'img');
+assert.equal(images.length, 1, 'active schemes and credentials are not images');
+assert.equal(images[0].src, 'https://store.test/image.jpg');
+assert.equal(images[0].alt, '');
+assert.equal(images[0].loading, 'lazy');
+assert.equal(images[0].referrerPolicy, 'no-referrer');
+images[0].events.error();
+assert.equal(images[0].hidden, true, 'broken images are hidden');
+assert.ok(text(productBox).includes('<svg onload=alert(1)>'), 'names remain text');
+assert.ok(!walk(productBox).some(node => ['script', 'svg'].includes(node.tag)));
+assert.ok(text(productBox).includes('0 GBP'), 'zero price and configured currency survive');
+assert.ok(text(productBox).includes('Prezzo non disponibile'));
+assert.ok(text(productBox).includes('Esaurito'));
+assert.ok(text(productBox).includes('49.00 EUR'));
+assert.ok(!text(productBox).includes('999'), 'parent price never substitutes for a variation');
+assert.ok(text(productBox).includes('Altre varianti'));
+identity = 'native-session-card-reset';
+events.focus();
+await tick();
+assert.ok(!find(node => node.className === 'wrag-products'), 'identity change removes cards');
 for (const statusCode of [404, 409, 429, 503]) {
   nextStatus = statusCode;
   await submit('error-' + statusCode);
@@ -178,4 +230,4 @@ await submit('expired-response');
 assert.ok(text(log).includes('Sessione scaduta'));
 await submit('after-expired-response');
 assert.equal(requests.at(-1).conversation_id, null);
-console.log('PASS: WP widget keyboard/focus, live status, safe sources/errors, login/logout/session isolation and stale reply; no browser bearer/storage');
+console.log('PASS: WP widget keyboard/focus, live status, safe sources/cards/errors, login/logout/session isolation and stale reply; no browser bearer/storage');

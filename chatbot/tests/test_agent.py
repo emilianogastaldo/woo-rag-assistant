@@ -13,7 +13,8 @@ from app.rag.chain import RetrievalResult, Source
 
 SESSION = Session(email="mario.rossi@example.com", customer_id=12)
 
-ANON_TOOLS = {"cerca_informazioni_negozio", "verifica_disponibilita_prodotto", "elenco_prodotti"}
+ANON_TOOLS = {"cerca_informazioni_negozio", "verifica_disponibilita_prodotto", "elenco_prodotti",
+              "cerca_prodotti"}
 ORDER_TOOLS = {"stato_ordine", "elenco_ordini"}
 
 

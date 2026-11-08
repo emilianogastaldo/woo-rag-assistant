@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     wc_sign_url: str = ""
     wc_consumer_key: str = ""
     wc_consumer_secret: str = ""
+    wc_currency: str = Field(default="EUR", pattern="^[A-Z]{3}$")
     wc_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     wc_retry_attempts: int = Field(default=1, ge=0, le=2)
     wc_order_timezone: str = "Europe/Rome"

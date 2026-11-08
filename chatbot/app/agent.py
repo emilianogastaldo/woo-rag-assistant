@@ -44,7 +44,7 @@ from app.resilience import (
     provider_call,
     tool_failure_message,
 )
-from app.tools.catalog import CatalogService
+from app.tools.catalog import CatalogProduct, CatalogService, ProductSearch
 from app.tools.orders import OrderList as ElencoOrdini
 from app.tools.orders import OrderLookup as StatoOrdine
 from app.tools.orders import OrderService
@@ -58,6 +58,14 @@ Regole vincolanti:
 - Per domande generali come "che prodotti ci sono?" usa elenco_prodotti.
   Per caratteristiche e descrizioni usa la ricerca documentale; per prezzo o
   disponibilità di un prodotto specifico usa verifica_disponibilita_prodotto.
+- Per consigli e regali usa cerca_prodotti: proponi 2–3 prodotti pertinenti, con
+  max_price uguale al budget nella valuta del negozio e stock_status=instock.
+  Cerca altri stati di stock solo se il cliente li chiede esplicitamente.
+  Se manca un dettaglio essenziale (destinatario, uso o interessi), chiedine uno.
+  Usa i documenti citati per spiegare caratteristiche e pertinenza, i dati live
+  per prezzi e disponibilità. Non attribuire caratteristiche non documentate.
+  Non inventare categorie, prodotti o varianti. Per prodotti variabili cita solo
+  prezzi delle varianti verificate, senza presentarli come prezzo di ogni variante.
 - Se uno strumento non trova nulla di pertinente, dichiara di non saperlo e
   invita a contattare l'assistenza. Non inventare mai policy, prezzi, tempi o dati.
 - Rispondi solo su argomenti relativi al negozio (catalogo, acquisti, spedizioni,
@@ -138,6 +146,9 @@ class Toolset:
     retrieved_chunks: ContextVar[dict[str, Source] | None] = field(
         default_factory=lambda: ContextVar("retrieved_chunks", default=None),
     )
+    verified_products: ContextVar[list[CatalogProduct] | None] = field(
+        default_factory=lambda: ContextVar("verified_products", default=None),
+    )
 
 
 @dataclass
@@ -145,6 +156,7 @@ class AgentResult:
     reply: str
     sources: list[CitedSource] = field(default_factory=list)
     tools_used: list[str] = field(default_factory=list)
+    products: list[CatalogProduct] = field(default_factory=list)
 
 
 @dataclass
@@ -194,7 +206,33 @@ def build_toolset(
     async def elenco_prodotti() -> str:
         return await shop.list_products()
 
+    async def cerca_prodotti(**filters: Any) -> str:
+        registry = toolset.verified_products.get()
+        if registry is not None:
+            registry.clear()
+        result = await shop.search_products(**filters)
+        # Cards must come from evidence actually delivered within the tool-output budget.
+        while (result.products and len(redact(result.model_dump_json()).encode())
+               > settings.tool_output_max_bytes):
+            result.products.pop()
+            result.may_have_more = True
+        if registry is not None:
+            registry.extend(result.products)
+        return result.model_dump_json()
+
     tools = [
+        StructuredTool.from_function(
+            coroutine=cerca_prodotti,
+            name="cerca_prodotti",
+            description=(
+                "Cerca prodotti pubblicati e visibili con testo, categoria (nome o slug), "
+                "prezzo e pagina. Per consigli/regali usa max_price per il budget e "
+                "stock_status=instock (default). Prezzi nella valuta del negozio, letti live. "
+                "Per prodotti variabili considera solo le varianti verificate, non il prezzo "
+                "del padre. may_have_more segnala che la pagina non è esaustiva."
+            ),
+            args_schema=ProductSearch,
+        ),
         StructuredTool.from_function(
             coroutine=elenco_prodotti,
             name="elenco_prodotti",
@@ -378,6 +416,8 @@ async def _answer(
     active = toolset if toolset is not None else build_toolset(session)
     chunks: dict[str, Source] = {}
     token = active.retrieved_chunks.set(chunks)
+    products: list[CatalogProduct] = []
+    products_token = active.verified_products.set(products)
     try:
         by_name = {tool.name: tool for tool in active.tools}
         model = llm if llm is not None else _build_llm(active.tools)
@@ -423,7 +463,11 @@ async def _answer(
                 reply, sources = validate_citations(redact(_as_text(ai_message.content)), chunks)
                 if "cerca_informazioni_negozio" in used and not sources:
                     reply = FALLBACK_REPLY if service_failure else UNCITED_REPLY
-                return AgentResult(reply=reply or FALLBACK_REPLY, sources=sources, tools_used=used)
+                return AgentResult(
+                    reply=reply or FALLBACK_REPLY, sources=sources, tools_used=used,
+                    products=(list(products)
+                              if reply and reply not in {UNCITED_REPLY, FALLBACK_REPLY} else []),
+                )
 
             for call in tool_calls:
                 current_budget().consume()
@@ -450,6 +494,8 @@ async def _answer(
                     except ValidationError:
                         failure = FailureKind.VALIDATION
                         output = tool_failure_message(failure)
+                        if name == "cerca_prodotti":
+                            products.clear()
                     try:
                         if failure is None:
                             output = await tool.ainvoke(args)
@@ -488,4 +534,5 @@ async def _answer(
         log_event(event="agent", outcome="stopped", duration_ms=0, failure=FailureKind.MAX_STEPS)
         return AgentResult(reply=FALLBACK_REPLY, tools_used=used)
     finally:
+        active.verified_products.reset(products_token)
         active.retrieved_chunks.reset(token)

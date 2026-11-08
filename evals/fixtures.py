@@ -14,7 +14,8 @@ from app.rag.chunks import split_documents
 RAG = "cerca_informazioni_negozio"
 STOCK = "verifica_disponibilita_prodotto"
 ORDER = "stato_ordine"
-TOOLS = {RAG, STOCK, ORDER, "elenco_ordini"}
+SEARCH = "cerca_prodotti"
+TOOLS = {RAG, STOCK, ORDER, "elenco_ordini", SEARCH}
 AS_OF = "2026-09-19"
 
 CORPUS = {
@@ -93,6 +94,10 @@ PLANS = {
     "followup-order": [(ORDER, {"numero_ordine": 22})],
     "ambiguous-request": [],
     "isolation-followup": [(ORDER, {"numero_ordine": 23})],
+    "gift-budget": [(RAG, {"domanda": "BOTTLE-THERMO"}),
+                    (SEARCH, {"query": "regalo", "max_price": 50, "per_page": 3})],
+    "gift-empty": [(SEARCH, {"query": "regalo", "max_price": 1, "per_page": 3})],
+    "gift-clarify": [],
 }
 
 
@@ -112,6 +117,18 @@ class FakeWoo:
         self.calls += 1
         params = params or {}
         if path == "products":
+            if params.get("search") == "regalo":
+                return [
+                    {"id": index, "name": name, "sku": sku, "price": price,
+                     "stock_status": "instock", "status": "publish", "type": "simple",
+                     "catalog_visibility": "visible",
+                     "permalink": f"https://demo.invalid/products/{index}"}
+                    for index, (name, sku, price) in enumerate([
+                        ("Borraccia Termica 500ml", "BOTTLE-THERMO", "24.90"),
+                        ("Maglietta Bio", "TSHIRT-BIO", "19.90"),
+                        ("Zaino Urban", "BACKPACK-URBAN", "59.00"),
+                    ], 1)
+                ]
             if params.get("sku", params.get("search")) != "TSHIRT-BIO":
                 return []
             return [
@@ -176,6 +193,8 @@ class ScriptedLLM:
             reply = "Ordine non trovato: verifica il numero."
         elif self.case_id == "ambiguous-request":
             reply = "Quale prodotto o ordine intendi? Puoi indicare il codice o il numero?"
+        elif self.case_id == "gift-clarify":
+            reply = "Per chi è il regalo e quali sono i suoi interessi?"
         elif not self.plan:
             reply = "Posso aiutarti solo con il negozio, prodotti e acquisti."
         else:
