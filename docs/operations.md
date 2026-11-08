@@ -55,7 +55,8 @@ La rotazione dei log del runtime/proxy resta configurazione dell'hosting.
 
 ## Scadenza e cancellazione
 
-Il TTL assoluto resta **1800 secondi**. Le conversazioni scadute sono eliminate
+Il TTL assoluto è configurabile con `CONVERSATION_TTL_SECONDS` (default
+**1800 secondi**). Le conversazioni scadute sono eliminate
 all'avvio, all'acquisizione e ogni `CONVERSATION_PURGE_INTERVAL_SECONDS` (default
 60 s), anche senza nuove chat. La disponibilità dei messaggi termina al TTL;
 la pulizia su disco avviene entro il ciclo successivo se lo storage funziona.
