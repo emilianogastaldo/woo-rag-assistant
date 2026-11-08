@@ -72,3 +72,32 @@ implementano configurazioni e fixture, non fingono una validazione del negozio r
 
 I default demo restano compatibili. Prima del pilota validare queste decisioni e
 la configurazione effettiva; una prova software non attesta conformità legale.
+
+## Esito dell'implementazione — 9 novembre 2026
+
+La matrice sopra conserva i gap della baseline. Gli interventi successivi coprono:
+
+- #29: quote individuali firmate dal bridge, tetto globale e porte locali su loopback.
+- #30–31: ricerca catalogo filtrata, varianti e schede provenienti dai dati del turno;
+  prodotti protetti da password esclusi anche dalle risposte legacy.
+- #32–33: date e numero pubblico degli ordini, tracking esplicito e resi configurabili.
+- #34: riserve giornaliere persistenti, metriche senza contenuti, purge periodico e
+  cancellazione autorizzata. Il cap predefinito è disabilitato; le unità non sono dollari.
+- #35: ZIP del bridge con widget incluso, impostazioni admin, diagnostica senza LLM
+  e [runbook di installazione](wordpress-plugin.md).
+- #36: corpus selezionabile, preview senza provider, snapshot completi e timer opt-in.
+  Nessun job è stato attivato e nessun indice della demo è stato rigenerato in questa fase.
+
+Le prove di integrazione del 9 novembre usano provider sintetici e risorse Docker
+separate dalla demo. Il progetto `woo-issue6-182d072c5c66` verifica auth, ordini,
+isolamento delle sessioni, limiti, privacy, persistenza dopo restart/recreate e
+widget DOM con HTTP reale. Il progetto `woo-issue7-ac3972eab2f9` verifica 16 casi
+con 43 query, promozione/rollback, errori di ingestion, disponibilità e recupero
+WordPress/Chroma. Entrambi hanno esito e cleanup PASS, senza chiamate esterne.
+I report locali sono sotto `evals/results/` nel checkout delle rispettive prove;
+sono generati, non dati necessari per installare il progetto.
+
+Le prove fake non attestano pertinenza o qualità del modello reale: #17 rimane
+separata e richiede nuova autorizzazione alle chiamate provider. Restano inoltre
+da validare tutte le decisioni del pilota elencate sopra, il confine HTTPS/proxy
+effettivo e l'accessibilità con dispositivi e screen reader reali.
