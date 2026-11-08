@@ -109,11 +109,11 @@ Tre livelli, tutti nel codice:
 1. **Registrazione condizionale.** `build_toolset(session)` aggiunge `stato_ordine` e
    `elenco_ordini` solo con una sessione valida. Per l'anonimo quei tool non esistono:
    non è una regola di prompt aggirabile con una riformulazione.
-2. **Firma scoped.** Lo schema esposto al modello contiene solo `numero_ordine`. Il
+2. **Firma scoped.** Lo schema espone numero pubblico o filtri data/pagina/limite. Il
    customer ID è chiuso nel costruttore di `OrderService` e non compare nel prompt
    (verificato da test).
 3. **Doppio filtro sul risultato.** La query REST filtra per `customer=<id>` *e* il
-   codice ricontrolla `customer_id` e `id` di ogni ordine restituito. Se il filtro
+   codice ricontrolla `customer_id` e ID interno o numero pubblico esatto. Se il filtro
    remoto cambiasse comportamento, il controllo locale regge comunque.
 
 Esito uniforme: ordine di altri, ordine inesistente e numero non valido producono lo
@@ -163,13 +163,15 @@ dell'ordine ma non certifica che il corriere abbia consegnato il pacco. Il tool 
 la restituisce quindi con l'etichetta **Data completamento** e non la usa mai per
 calcolare un reso.
 
-La fonte scelta per la demo è il metadata ordine `_wrag_delivery_date`, popolato
-dall'integrazione di tracking soltanto alla conferma del corriere e salvato in ISO 8601.
-Il tool accetta esclusivamente quel metadata valido come **Data consegna verificata**.
+La fonte sintetica scelta per la demo è il metadata ordine `_wrag_delivery_date`,
+salvato in ISO 8601. Sul negozio reale il titolare deve concordare una fonte scritta
+esclusivamente dopo la conferma di consegna; non è stato scelto o certificato un
+plugin/corriere. L'adapter configurabile (#33) legge soltanto le chiavi concordate.
 Se manca o non è leggibile, riporta esplicitamente che la scadenza del reso non è
 calcolabile con certezza; non stima la data dal completamento o dallo stato `completed`.
-Quando la data è disponibile, il tool calcola la scadenza aggiungendo 30 giorni a
-quella data, in linea con la policy di reso.
+Quando la data è disponibile, il tool usa i giorni configurati per il reso (30 nella
+demo); il calcolo è disabilitabile. Stato ordine e stato spedizione sono distinti.
+Configurazione, fallback e decisioni del pilota: [guida tracking](order-tracking.md).
 
 Il seed assegna questo metadata all'ordine demo completato di Mario e applica una
 piccola migrazione idempotente (`wrag_seed_delivery_date_v1`) per gli ambienti seed
@@ -564,3 +566,38 @@ lock Python e digest Docker sono condivisi fra build, CI e harness locale.
 Protocollo, crash recovery, bootstrap e limiti sono descritti nella
 [guida operativa](ingestion-deployment.md). I test su WordPress/Woo e Chroma reali
 usano solo una rete interna e provider deterministici, non dati della demo.
+
+### DEC-017 — Calendario negozio e numeri pubblici degli ordini (#32)
+
+`elenco_ordini` accetta date inclusive `YYYY-MM-DD` (`date_from`/`date_to`),
+pagina 1–50 e massimo 20 ordini per pagina (default 5). Per un giorno si usa la
+stessa data nei due campi; estremi omessi lasciano il relativo lato aperto.
+Gli schemi e il servizio validano date reali, ordine degli estremi, tipi e limiti;
+gli anni estremi 0001/9999 sono esclusi per evitare overflow nella conversione.
+`WC_ORDER_TIMEZONE` è il calendario IANA del negozio, default demo `Europe/Rome`:
+va impostato uguale al calendario del negozio pilota. Gli estremi diventano UTC
+per `dates_are_gmt=true`; poiché `before`/`after` di WooCommerce sono esclusivi,
+la query comprende anche i secondi iniziale e finale della giornata locale.
+Il servizio ricontrolla anche le date dei risultati, usando `date_created_gmt`
+quando disponibile, e segnala pagine potenzialmente parziali o il tetto raggiunto.
+
+`stato_ordine.numero_ordine` stringa è il numero pubblico, anche alfanumerico
+(lettere, cifre, punti, trattini e underscore), confrontato esattamente con
+`number`. Una stringa numerica non diventa un ID. Gli interi restano il percorso
+legacy per l'ID interno, con `customer` + `include` e doppio controllo locale;
+questa compatibilità serve anche alle eval esistenti. Non passare al tool un
+numero pubblico come intero. Il customer ID resta escluso dagli schemi e dal
+prompt; i tool restano assenti per gli ospiti.
+
+Il lookup pubblico usa soltanto pagine scoped sul cliente, massimo 5 × 20 ordini
+recenti, senza query globali o assunzioni sulla ricerca di plugin di numerazione.
+Più ID con lo stesso numero producono ambiguità. Se tutte le cinque pagine sono
+piene, anche una corrispondenza trovata non viene dichiarata univoca: la risposta
+segnala il limite e invita all'assistenza. Una quinta pagina piena viene trattata
+conservativamente come ricerca parziale anche quando gli ordini sono esattamente
+100. Ordini altrui e inesistenti hanno lo stesso esito neutro.
+
+Verifica offline: 186 test mirati su ordini, agent, auth WordPress, sicurezza,
+resilienza, citazioni, resi demo ed eval. Fixture con numero diverso dall'ID,
+ambiguo e alfanumerico, limite ricerca, pagine, intervalli e cambio ora legale.
+Nessuna chiamata a modelli/provider o mutazione di ordini reali.
