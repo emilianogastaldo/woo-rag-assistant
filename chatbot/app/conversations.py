@@ -148,13 +148,13 @@ class MemoryRateLimiter:
         self.clock = clock
         self.rows: dict[str, tuple[float, int]] = {}
 
-    def check(self, key: str) -> int:
+    def check(self, key: str, *, limit: int | None = None) -> int:
         now = self.clock()
         self.rows = {k: v for k, v in self.rows.items() if v[0] > now}
         if key not in self.rows and len(self.rows) >= settings.rate_limit_capacity:
             return max(1, int(settings.rate_limit_window_seconds))
         end, count = self.rows.get(key, (now + settings.rate_limit_window_seconds, 0))
-        if count >= settings.rate_limit_requests:
+        if count >= (settings.rate_limit_requests if limit is None else limit):
             return max(1, int(end - now) + 1)
         self.rows[key] = end, count + 1
         return 0

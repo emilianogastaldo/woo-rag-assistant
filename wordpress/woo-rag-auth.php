@@ -62,6 +62,22 @@ function wrag_backend_token() {
         . $encode(hash_hmac('sha256', $payload, getenv('WRAG_BRIDGE_SECRET'), true));
 }
 
+function wrag_visitor_assertion() {
+    // REMOTE_ADDR must be set by the trusted web server, never a browser header.
+    $identity = is_user_logged_in() ? 'auth:' . get_current_user_id()
+        : 'guest:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    $payload = wp_json_encode([
+        'sub' => (is_user_logged_in() ? 'auth:' : 'guest:')
+            . hash_hmac('sha256', $identity, getenv('WRAG_BRIDGE_SECRET')),
+        'exp' => time() + 30,
+    ]);
+    $encode = static function ($value) {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    };
+    return $encode($payload) . '.'
+        . $encode(hash_hmac('sha256', 'rate-limit:' . $payload, getenv('WRAG_BRIDGE_SECRET'), true));
+}
+
 function wrag_chat($request) {
     if (strlen($request->get_body()) > 24000) {
         return new WP_Error('wrag_size', 'Richiesta troppo grande', ['status' => 413]);
@@ -74,7 +90,10 @@ function wrag_chat($request) {
             || !preg_match('/^[A-Za-z0-9_-]{43}$/D', $body['conversation_id'])))) {
         return new WP_Error('wrag_request', 'Richiesta non valida', ['status' => 422]);
     }
-    $headers = ['Content-Type' => 'application/json'];
+    $headers = [
+        'Content-Type' => 'application/json',
+        'X-WRAG-Visitor' => wrag_visitor_assertion(),
+    ];
     if (is_user_logged_in()) {
         $headers['Authorization'] = 'Bearer ' . wrag_backend_token();
     } elseif (isset($_COOKIE['wrag_guest'])

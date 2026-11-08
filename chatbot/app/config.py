@@ -145,6 +145,7 @@ class Settings(BaseSettings):
     customer_cache_ttl_seconds: int = Field(default=300, ge=1)
     customer_cache_capacity: int = Field(default=1000, ge=1)
     rate_limit_requests: int = Field(default=20, ge=1)
+    rate_limit_global_requests: int = Field(default=200, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
     rate_limit_capacity: int = Field(default=10000, ge=1)
 

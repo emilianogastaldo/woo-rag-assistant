@@ -450,7 +450,8 @@ nessuna credenziale viene inclusa nelle risposte chat.
 | Budget modello: 100000 unità conservative per turno | Prenota byte UTF-8 serializzati + overhead/schema + massimo output prima di ogni chiamata/retry; nessun rimborso |
 | Output modello: 512 token per chiamata | Limite inviato al provider, incluso nella prenotazione |
 | Cache email→ID: TTL fisso 300 s, capienza 1000 | Scadenza e rimozione LRU; nessun customer ID entra nel contesto |
-| `/chat`: 20 richieste / 60 s per IP, massimo 10000 chiavi | Finestra fissa; anche richieste invalide consumano quota; 429 con `Retry-After` in secondi |
+| `/chat`: 20 richieste / 60 s per visitatore attestato o peer diretto, massimo 10000 chiavi | Finestra fissa; anche richieste invalide consumano quota; 429 con `Retry-After` in secondi |
+| `/chat`: 200 richieste / 60 s complessive (`RATE_LIMIT_GLOBAL_REQUESTS`) | Tetto separato, condiviso tra bridge e accessi diretti; include richieste rifiutate |
 
 Le unità del budget sono una stima superiore conservativa per i tokenizer byte-pair
 OpenAI, non token fatturati misurati. Le chiamate embedding sono limitate da input,
@@ -473,10 +474,16 @@ solo messaggi utente e risposte finali già redatti, più il digest dell'owner; 
 file non è cifrato. Proteggere volume e backup come dati di conversazione. Il file
 e il lock sono creati con permessi `0600`; un errore di salvataggio restituisce 503.
 
-Il rate limit usa il peer di rete, non header forniti dal client. Il Compose avvia
+Il rate limit diretto usa il peer di rete, non header forniti dal client. Il Compose avvia
 Uvicorn con `--no-proxy-headers`: dietro proxy, tutti i client condividono la quota
 del proxy; configurare limiti al proxy per IP reali verificati. Nessuna espulsione
 di chiavi rate attive a capienza esaurita: nuove chiavi ricevono 429.
+
+Il bridge WordPress attesta invece una quota per account autenticato o IP ospite,
+così gli utenti non condividono la sola quota del server WP. L'attestazione resta
+server-side e non autentica clienti; il tetto globale continua a valere. Le porte
+della demo sono pubblicate solo su `127.0.0.1`.
+[Configurazione e verifica di rete, proxy e quote](docs/bridge-deployment.md).
 
 Output tool/documenti/campi Woo rimangono `ToolMessage` nel campo JSON
 `untrusted_data`, separati dalle istruzioni di sistema. Il codice filtra gli ordini

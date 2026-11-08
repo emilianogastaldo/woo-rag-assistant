@@ -13,6 +13,7 @@ from app import main
 from app.agent import AgentResult, build_toolset
 from app.auth import session as auth
 from app.config import Settings, settings
+from app.conversations import MemoryRateLimiter
 from app.tools.orders import ORDER_NOT_FOUND, OrderService
 from tests.conftest import FakeWooClient, make_order
 
@@ -121,4 +122,104 @@ def test_wp_cached_customer_mapping_must_match_signed_native_user(bridge):
     response = client.post("/chat", json={"message": "21"},
                            headers={"Authorization": "Bearer " + wp_token()})
     assert response.status_code == 401
+    assert calls == []
+
+
+def visitor_assertion(subject="guest:" + "a" * 64, expires=None, secret=BRIDGE_SECRET):
+    payload = json.dumps({"sub": subject, "exp": int(time.time()) + 30
+                          if expires is None else expires}).encode()
+    return auth._b64encode(payload) + "." + auth._signature(b"rate-limit:" + payload, secret)
+
+
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_bridge_visitors_have_independent_quotas(bridge, monkeypatch, authenticated):
+    client, calls, _ = bridge
+    monkeypatch.setattr(settings, "rate_limit_requests", 1)
+    prefix = "auth:" if authenticated else "guest:"
+    a = {"X-WRAG-Visitor": visitor_assertion(prefix + "a" * 64)}
+    b = {"X-WRAG-Visitor": visitor_assertion(prefix + "b" * 64)}
+    if authenticated:
+        a["Authorization"] = "Bearer " + wp_token()
+        b["Authorization"] = "Bearer " + wp_token("b@example.test", uid=102, sid="b" * 64)
+    assert client.post("/chat", json={"message": "21"}, headers=a).status_code == 200
+    blocked = client.post("/chat", json={"message": "21"}, headers=a)
+    assert blocked.status_code == 429 and int(blocked.headers["Retry-After"]) > 0
+    assert client.post("/chat", json={"message": "22"}, headers=b).status_code == 200
+    assert len(calls) == 2
+    # Switching to guest/auth changes quota only; an assertion does not grant login.
+    other = {"X-WRAG-Visitor": visitor_assertion(
+        ("guest:" if authenticated else "auth:") + "a" * 64
+    )}
+    response = client.post("/chat", json={"message": "21"}, headers=other)
+    assert response.status_code == 200 and response.json()["authenticated"] is False
+
+
+def test_global_cap_covers_bridge_and_direct_requests_and_resets(bridge, monkeypatch):
+    client, calls, _ = bridge
+    monkeypatch.setattr(settings, "rate_limit_global_requests", 2)
+    now = [0]
+    main.app.state.global_rate_limiter = MemoryRateLimiter(clock=lambda: now[0])
+    assert client.post("/chat", json={"message": "21"}).status_code == 200
+    headers = {"X-WRAG-Visitor": visitor_assertion()}
+    assert client.post("/chat", json={"message": "21"}, headers=headers).status_code == 200
+    headers["X-WRAG-Visitor"] = visitor_assertion("guest:" + "b" * 64)
+    response = client.post("/chat", json={"message": "21"}, headers=headers)
+    assert response.status_code == 429 and int(response.headers["Retry-After"]) > 0
+    assert len(calls) == 2
+    now[0] = settings.rate_limit_window_seconds + 1
+    assert client.post("/chat", json={"message": "21"}, headers=headers).status_code == 200
+
+
+@pytest.mark.parametrize("expires", [0, True, "later", None, 999999999999])
+def test_invalid_visitor_expiry_rejected(bridge, expires):
+    # Construct None literally rather than use the helper's default expiry.
+    payload = json.dumps({"sub": "guest:" + "a" * 64, "exp": expires}).encode()
+    assertion = auth._b64encode(payload) + "." + auth._signature(
+        b"rate-limit:" + payload, BRIDGE_SECRET
+    )
+    with pytest.raises(auth.SessionError):
+        auth.bridge_rate_identity(assertion)
+
+
+def test_visitor_assertion_signature_subject_and_namespace(bridge, monkeypatch):
+    assertion = visitor_assertion()
+    assert auth.bridge_rate_identity(assertion) == "guest:" + "a" * 64
+    for invalid in (
+        "", "x" * 513, "garbage", assertion + "x",
+        visitor_assertion(secret=settings.session_secret),
+        visitor_assertion(subject="client-choice"),
+        visitor_assertion(subject="auth:101"),
+        wp_token(), wp_token()[3:], auth.issue_token("a@example.test"),
+    ):
+        with pytest.raises(auth.SessionError):
+            auth.bridge_rate_identity(invalid)
+    for token in (assertion, "wp." + assertion):
+        with pytest.raises(auth.SessionError):
+            auth.verify_token(token)
+    monkeypatch.setattr(settings, "wrag_bridge_secret", "")
+    with pytest.raises(auth.SessionError):
+        auth.bridge_rate_identity(assertion)
+
+
+def test_forged_assertions_and_forwarded_ips_share_direct_quota(bridge, monkeypatch):
+    client, calls, _ = bridge
+    monkeypatch.setattr(settings, "rate_limit_requests", 2)
+    for suffix in ("a", "b"):
+        response = client.post("/chat", json={"message": "21"}, headers={
+            "X-WRAG-Visitor": "forged-" + suffix, "X-Forwarded-For": "192.0.2." + suffix,
+        })
+        assert response.status_code == 401
+    assert client.post("/chat", json={"message": "21"}).status_code == 429
+    # A valid bridge request is separate from the exhausted direct-peer quota.
+    response = client.post("/chat", json={"message": "21"},
+                           headers={"X-WRAG-Visitor": visitor_assertion()})
+    assert response.status_code == 200 and len(calls) == 1
+
+
+def test_invalid_bodies_consume_the_attested_quota(bridge, monkeypatch):
+    client, calls, _ = bridge
+    monkeypatch.setattr(settings, "rate_limit_requests", 1)
+    headers = {"X-WRAG-Visitor": visitor_assertion()}
+    assert client.post("/chat", content="not-json", headers=headers).status_code == 422
+    assert client.post("/chat", json={"message": "21"}, headers=headers).status_code == 429
     assert calls == []
