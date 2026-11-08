@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly Woo RAG knowledge refresh (opt-in)
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=300
+Persistent=false
+Unit=woo-rag-sync.service
+
+[Install]
+WantedBy=timers.target
