@@ -59,6 +59,13 @@
   .wrag-msg.error{align-self:stretch;background:#fff0e9;color:#853e29;border:1px solid #AD593F;font-size:13px}
   .wrag-sources{flex-shrink:0;align-self:flex-start;max-width:100%;font-size:12px;overflow-wrap:anywhere}
   .wrag-panel a{color:#315C49;text-decoration:underline;text-underline-offset:3px}
+  .wrag-products{flex-shrink:0;display:grid;gap:10px;max-width:100%}
+  .wrag-product{padding:12px;border:1px solid #d4d9cd;border-radius:10px;background:#fff}
+  .wrag-product h3{margin:0 0 8px;font-size:14px;overflow-wrap:anywhere}
+  .wrag-product p{margin:4px 0;overflow-wrap:anywhere}
+  .wrag-product img{display:block;width:80px;height:80px;object-fit:contain;margin-bottom:8px}
+  .wrag-product ul{padding-left:20px;margin:8px 0;overflow-wrap:anywhere}
+  .wrag-product a{display:inline-block;min-height:44px;padding:10px 0}
   .wrag-msg a{font-weight:600}
   .wrag-status{margin:0;padding:0 16px;font-size:12px;color:#315C49;min-height:24px}
   .wrag-form{display:flex;gap:8px;padding:12px;border-top:1px solid #d4d9cd;background:#fff}
@@ -144,11 +151,16 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  function sourceLink(source, label) {
-    // Le URL dei documenti sono dati non fidati, come il testo del modello.
+  function safeUrl(value) {
+    if (typeof value !== "string" || /[\s\\]/.test(value)) return null;
     let url;
-    try { url = new URL(source.url); } catch (_) { return el("span", null, label); }
-    if (!["http:", "https:"].includes(url.protocol)) return el("span", null, label);
+    try { url = new URL(value); } catch (_) { return null; }
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url : null;
+  }
+
+  function sourceLink(source, label) {
+    const url = safeUrl(source.url);
+    if (!url) return el("span", null, label);
     const link = el("a", null, label);
     link.href = url.href;
     link.target = "_blank";
@@ -186,6 +198,63 @@
       box.appendChild(sourceLink(source, "[" + (index + 1) + "] " + source.title));
     });
     log.appendChild(box);
+    scrollDown();
+  }
+
+  function productPrice(price, currency) {
+    return typeof price === "string" && /^\d+(\.\d+)?$/.test(price) &&
+      typeof currency === "string" && /^[A-Z]{3}$/.test(currency)
+      ? price + " " + currency : "Prezzo non disponibile";
+  }
+
+  function addProducts(products) {
+    if (!Array.isArray(products) || !products.length) return;
+    const box = el("div", "wrag-products");
+    box.setAttribute("role", "list");
+    box.setAttribute("aria-label", "Prodotti verificati in questa risposta");
+    const stockLabels = { instock: "Disponibile", outofstock: "Esaurito",
+      onbackorder: "Ordinabile su prenotazione" };
+    products.slice(0, 10).forEach(function (product) {
+      if (!product || typeof product.name !== "string" || !Number.isInteger(product.id)) return;
+      const card = el("article", "wrag-product");
+      card.setAttribute("role", "listitem");
+      const title = el("h3");
+      title.appendChild(sourceLink({ url: product.url, title: product.name }, product.name));
+      const imageUrl = safeUrl(product.image);
+      if (imageUrl) {
+        const image = el("img");
+        image.src = imageUrl.href;
+        image.alt = "";
+        image.loading = "lazy";
+        image.referrerPolicy = "no-referrer";
+        image.addEventListener("error", () => { image.hidden = true; });
+        card.appendChild(image);
+      }
+      card.appendChild(title);
+      card.appendChild(el("p", null, stockLabels[product.stock_status] || "Disponibilità non verificata"));
+      if (product.type === "variable") {
+        card.appendChild(el("p", null, "Prezzi delle varianti verificate:"));
+        const variants = Array.isArray(product.variants) ? product.variants : [];
+        const list = el("ul");
+        variants.slice(0, 3).forEach(function (variant) {
+          if (!variant || typeof variant !== "object") return;
+          const attributes = variant.attributes && typeof variant.attributes === "object"
+            ? Object.entries(variant.attributes).map(([name, value]) => name + ": " + value).join(", ")
+            : "";
+          list.appendChild(el("li", null, (attributes ? attributes + " — " : "") +
+            productPrice(variant.price, product.currency) + " · " +
+            (stockLabels[variant.stock_status] || "Disponibilità non verificata")));
+        });
+        card.appendChild(list);
+        if (!variants.length) card.appendChild(el("p", null, "Prezzo non disponibile"));
+        if (variants.length > 3 || product.variants_may_have_more) {
+          card.appendChild(el("p", null, "Altre varianti possono essere disponibili nella scheda."));
+        }
+      } else card.appendChild(el("p", null, productPrice(product.price, product.currency)));
+      if (!safeUrl(product.url)) card.appendChild(el("p", null, "Link alla scheda non disponibile"));
+      box.appendChild(card);
+    });
+    if (box.children.length) log.appendChild(box);
     scrollDown();
   }
 
@@ -331,6 +400,7 @@
       state.conversationId = data.conversation_id;
       addMessage("bot", data.reply, data.sources);
       addSources(data.sources);
+      addProducts(data.products);
     } catch (error) {
       if (epoch !== state.epoch) return;
       addMessage("error", "L'assistente non è disponibile. Riprova tra poco.");
