@@ -52,6 +52,10 @@ Il limite richieste backend continua a usare il peer IP reale: dietro questo pon
 il budget è condiviso dal processo WordPress, quindi va dimensionato per il volume
 del negozio. Non vengono fidati header IP liberamente inviati dal browser.
 
+Aggiornamento #29: questa limitazione del risultato originale è superata dalle
+quote visitatore attestate e da un tetto globale distinto; vedere il
+[runbook corrente](bridge-deployment.md).
+
 ## Verifica locale, 2026-11-03
 
 Test ripetibili nel repository, senza rete/provider:

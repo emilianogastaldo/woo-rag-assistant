@@ -21,7 +21,9 @@ def main():
     parser.add_argument(
         "--demo-final", action="store_true", help="Also verify theme, assets, returns and ingestion"
     )
-    final = parser.parse_args().demo_final
+    parser.add_argument("--mcp", action="store_true", help="Also test the optional MCP adapter")
+    args = parser.parse_args()
+    final = args.demo_final or args.mcp
     project = f"woo-issue19-{uuid.uuid4().hex[:12]}"
     output = ROOT / "evals/results" / project
     output.mkdir(parents=True)
@@ -39,8 +41,10 @@ def main():
         }
     }
 
-    def run(command, timeout=180):
-        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout)
+    def run(command, timeout=180, input=None):
+        result = subprocess.run(
+            command, env=env, capture_output=True, text=True, timeout=timeout, input=input
+        )
         if result.returncode:
             # Do not print seed output: first run creates a disposable read-only key.
             raise RuntimeError(f"Command failed: {command[:5]}\n{result.stderr[-4000:]}")
@@ -49,7 +53,7 @@ def main():
     # Reuse already built, version-pinned issue7 images by immutable local image ID.
     images = {}
     for name, tag in {
-        "wordpress": "woo-issue19-wp:11.2.2",
+        "wordpress": "woo-mcp-wp:11.2.2-0.7.1" if args.mcp else "woo-issue19-wp:11.2.2",
         "cli": "woo-issue19-cli:11.2.2",
         "db": "mariadb@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4",
     }.items():
@@ -183,6 +187,10 @@ wp eval-file /issue19.php
             "command": ["python", "-m", "evals.issue25_ingestion"],
         }
         config["volumes"].update({"chroma": {}, "state": {}})
+    if args.mcp:
+        config["services"]["cli"]["volumes"].append(
+            f"{ROOT / 'evals/mcp_setup.php'}:/mcp-setup.php:ro"
+        )
     compose = output / "compose.json"
     compose.write_text(json.dumps(config, indent=2) + "\n")
     base = ["docker", "compose", "--env-file", "/dev/null", "-f", str(compose), "-p", project]
@@ -227,6 +235,11 @@ wp eval-file /issue19.php
                 "ingest-check",
             ], timeout=240)
             report["ingestion"] = json.loads(ingestion.split("__ISSUE25__", 1)[1])
+            if args.mcp:
+                from mcp_probe import probe
+
+                run([*cli, "wp", "plugin", "activate", "mcp-adapter"])
+                report["mcp"] = probe(cli, run)
             result = run([*evaluate, "/issue19.php"], timeout=240)
             returns = run([*evaluate, "/returns-test.php"])
             report["returns"] = json.loads(returns[returns.index("{"):])
