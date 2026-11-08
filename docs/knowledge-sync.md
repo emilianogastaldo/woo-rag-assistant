@@ -27,8 +27,8 @@ vuoto fallisce preservando l'attiva, richiedendo intervento dell'operatore.
 
 ```bash
 docker compose build ingest
-docker compose run --rm ingest preview
-docker compose run --rm ingest build
+docker compose run --rm ingest python -m app.ingest preview
+docker compose run --rm ingest python -m app.ingest build
 ```
 
 `preview` legge WooCommerce/WordPress e mostra conteggi e URL pubblici, senza

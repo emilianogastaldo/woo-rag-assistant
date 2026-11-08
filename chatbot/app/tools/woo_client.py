@@ -166,6 +166,8 @@ class WooClient:
             if total is not None:
                 if not total.isdigit() or int(total) > max_pages:
                     raise ValueError("WooCommerce corpus exceeds configured page limit")
+                if not batch and int(total) > 0:
+                    raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
                 if page >= int(total):
                     return results
             elif len(batch) < per_page:

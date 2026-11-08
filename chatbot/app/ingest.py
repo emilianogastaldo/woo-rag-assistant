@@ -40,7 +40,7 @@ async def fetch_product_docs() -> list[Document]:
         )
     docs: list[Document] = []
     for p in products:
-        if (p.get("status", "publish") != "publish"
+        if (p.get("status", "publish") != "publish" or p.get("post_password")
                 or p.get("catalog_visibility", "visible") not in {"visible", "catalog"}):
             continue
         body = "\n\n".join(
@@ -92,6 +92,8 @@ async def fetch_page_docs() -> list[Document]:
             if total is not None:
                 if not total.isdigit() or int(total) > settings.knowledge_max_pages:
                     raise VersionError("Knowledge pages exceed configured limit")
+                if not batch and int(total) > 0:
+                    raise VersionError("Incomplete WordPress page response")
                 if page >= int(total):
                     break
             elif len(batch) < 100:

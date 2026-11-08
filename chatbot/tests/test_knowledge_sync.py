@@ -77,6 +77,7 @@ async def test_product_corpus_filters_visibility_and_excludes_live_fields(monkey
         {"name": "Public", "description": "Description", "price": "99.99", "stock_quantity": 999},
         {"name": "Hidden", "description": "Secret", "catalog_visibility": "hidden"},
         {"name": "Private", "description": "Secret", "status": "private"},
+        {"name": "Protected", "description": "Secret", "post_password": "synthetic-password"},
     ]
     woo.__aenter__.return_value = woo
     monkeypatch.setattr(ingest, "WooClient", lambda: woo)
@@ -99,6 +100,21 @@ async def test_woo_snapshot_page_limit_and_repeated_page(monkeypatch):
         from app.resilience import RecoverableFailure
         with pytest.raises(RecoverableFailure):
             await woo.get_all("products", max_pages=2)
+    finally:
+        await woo.aclose()
+
+
+async def test_empty_declared_page_rejects_incomplete_snapshots(monkeypatch):
+    response = httpx.Response(200, json=[], headers={"X-WP-TotalPages": "2"})
+    pages_http(monkeypatch, lambda req: response)
+    with pytest.raises(VersionError, match="Incomplete"):
+        await ingest.fetch_page_docs()
+    from app.resilience import RecoverableFailure
+    woo = WooClient()
+    woo.get = AsyncMock(return_value=response)
+    try:
+        with pytest.raises(RecoverableFailure):
+            await woo.get_all("products")
     finally:
         await woo.aclose()
 

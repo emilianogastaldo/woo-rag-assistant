@@ -7,5 +7,5 @@ After=docker.service
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/woo-rag-assistant
-ExecStart=/usr/bin/docker compose run --rm -T --no-deps ingest build
+ExecStart=/usr/bin/docker compose run --rm -T --no-deps ingest python -m app.ingest build
 TimeoutStartSec=15min
