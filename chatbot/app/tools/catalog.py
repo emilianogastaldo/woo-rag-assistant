@@ -94,6 +94,7 @@ class WooVariation(BaseModel):
     model_config = ConfigDict(strict=True)
     id: int = Field(gt=0)
     status: str
+    post_password: str = ""
     price: str = Field(default="", pattern=r"^(?:[0-9]+(?:\.[0-9]+)?)?$", max_length=32)
     stock_status: str = Field(pattern="^(instock|outofstock|onbackorder)$")
     attributes: list[WooAttribute] = Field(default_factory=list)
@@ -157,6 +158,7 @@ def _public_rows(rows: Any) -> list[dict]:
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise RecoverableFailure(FailureKind.MALFORMED_RESPONSE)
     return [row for row in rows if row.get("status", "publish") == "publish"
+            and not row.get("post_password")
             and row.get("catalog_visibility", "visible") in {"visible", "catalog", "search"}]
 
 
@@ -220,8 +222,8 @@ class CatalogService:
         products = _rows(await self._woo.get_json("products", params), WooProduct)
         result.may_have_more = len(products) >= query.per_page
         for row in products[:query.per_page]:
-            if row.status != "publish" or row.catalog_visibility not in {"visible", "catalog",
-                                                                         "search"}:
+            if (row.status != "publish" or row.post_password
+                    or row.catalog_visibility not in {"visible", "catalog", "search"}):
                 continue
             if category_id is not None and category_id not in {c.id for c in row.categories}:
                 continue
@@ -246,6 +248,7 @@ class CatalogService:
                     id=v.id, price=v.price or None, stock_status=v.stock_status,
                     attributes={a.name: a.option for a in v.attributes},
                 ) for v in variations[:10] if v.status == "publish"
+                    and not v.post_password
                     and _matches(v.price, v.stock_status, query)]
                 if not product.variants:
                     continue
