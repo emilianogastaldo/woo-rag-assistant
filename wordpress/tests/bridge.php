@@ -18,10 +18,12 @@ class WP_REST_Response {
     public function header($key, $value) { $this->headers[$key] = $value; }
 }
 class Request {
+    public $conversation_id = null;
     public function __construct(public $body = '{"message":"21"}', public $nonce = 'nonce') {}
     public function get_header($name) { return $this->nonce; }
     public function get_body() { return $this->body; }
     public function get_json_params() { return json_decode($this->body, true); }
+    public function get_param($name) { return $this->conversation_id; }
 }
 $hooks = [];
 $stored_options = [];
@@ -34,7 +36,7 @@ function get_current_user_id() { global $uid; return $uid; }
 function wp_validate_auth_cookie(...$args) { global $valid_cookie; return $valid_cookie; }
 function wp_get_current_user() { return (object) ['user_email' => 'a@example.test']; }
 function wp_json_encode($value) { return json_encode($value); }
-function wp_remote_post($url, $options) {
+function wp_remote_request($url, $options) {
     global $forwarded, $upstream; $forwarded = [$url, $options]; return $upstream;
 }
 function is_wp_error($value) { return $value instanceof WP_Error; }
@@ -83,6 +85,7 @@ $session = 'native-session-b';
 check(wrag_session_key() !== $key, 'separate native logins');
 $response = wrag_chat(new Request());
 check($forwarded[0] === 'http://backend.internal:8000/chat', 'fixed server destination');
+check($forwarded[1]['method'] === 'POST', 'chat method preserved');
 check(str_starts_with($forwarded[1]['headers']['Authorization'], 'Bearer wp.'), 'server assertion');
 check($forwarded[1]['redirection'] === 0 && $forwarded[1]['limit_response_size'] === 65536, 'bounded upstream');
 $visitor = $forwarded[1]['headers']['X-WRAG-Visitor'];
@@ -131,6 +134,19 @@ $upstream['set-cookie'] = 'arbitrary=secret; Path=/';
 check(!isset(wrag_chat(new Request())->headers['Set-Cookie']), 'no arbitrary cookie passthrough');
 $upstream['body'] = 'truncated';
 check(wrag_chat(new Request())->data['status'] === 502, 'bad upstream fails closed');
+$delete = new Request();
+$delete->conversation_id = str_repeat('a', 43);
+$upstream['body'] = '';
+$upstream['status'] = 204;
+$_COOKIE['wrag_guest'] = 'guest.signature';
+$deleted = wrag_delete($delete);
+check($deleted->status === 204 && $deleted->data === null, 'empty deletion response accepted');
+check($forwarded[0] === 'http://backend.internal:8000/chat/' . $delete->conversation_id
+    && $forwarded[1]['method'] === 'DELETE' && $forwarded[1]['body'] === '', 'fixed deletion target');
+check($forwarded[1]['headers']['Cookie'] === 'wrag_guest=guest.signature'
+    && isset($forwarded[1]['headers']['X-WRAG-Visitor']), 'delete preserves guest ownership and quota');
+$delete->conversation_id = '../other';
+check(wrag_delete($delete)->data['status'] === 422, 'delete path injection rejected');
 putenv('WRAG_BRIDGE_SECRET=');
 check(wrag_permission(new Request())->data['status'] === 503, 'disabled without secret');
 echo "PASS: WP bridge synthetic permissions, assertions, guests, isolation and boundaries\n";

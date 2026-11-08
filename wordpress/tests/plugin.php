@@ -6,7 +6,7 @@ function current_user_can($capability) { global $admin; return $admin; }
 function add_settings_error(...$args) { global $settings_errors; $settings_errors[] = $args; }
 function sanitize_text_field($text) { return strip_tags($text); }
 function wp_http_validate_url($url) { return str_starts_with($url, 'https://public.example') ? $url : false; }
-function wp_remote_get($url, $options) { return wp_remote_post($url, $options); }
+function wp_remote_get($url, $options) { return wp_remote_request($url, $options); }
 function check_admin_referer($action) { throw new Exception('nonce check reached:' . $action); }
 function wp_die(...$args) { throw new Exception('forbidden'); }
 function esc_attr($value) { return htmlspecialchars($value, ENT_QUOTES); }
@@ -61,6 +61,10 @@ check(!wrag_http_options()['reject_unsafe_urls'], 'environment retains private d
 ob_start(); wrag_settings_page(); $html = ob_get_clean();
 check(!str_contains($html, str_repeat('s', 32)) && !str_contains($html, str_repeat('e', 32)), 'no stored or environment secret in admin HTML');
 check(!str_contains(json_encode(wrag_config()->data), str_repeat('s', 32)), 'no secret in public config');
+check(!str_contains($html, 'backend.internal'), 'editable URL uses saved value instead of environment override');
+$stored_options = [];
+$branding = array_replace($valid, ['backend_url' => '', 'bridge_secret' => '', 'title' => 'New title']);
+check(wrag_sanitize_options($branding)['title'] === 'New title', 'private environment permits branding edits without saving its URL');
 $before = count($hooks['wp_footer']);
 require dirname(__DIR__) . '/woo-rag-auth.php';
 check(count($hooks['wp_footer']) === $before, 'MU plus regular copy cannot register twice');

@@ -12,22 +12,23 @@ Il customer ID non entra mai nel payload della richiesta né nel prompt.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
 import time
 import uuid
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager, nullcontext, suppress
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Path, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.agent import FALLBACK_REPLY, answer
+from app.agent import FALLBACK_REPLY, UNCITED_REPLY, answer
 from app.auth.session import (
     DEMO_CUSTOMERS,
     SessionError,
@@ -52,6 +53,17 @@ from app.readiness import check_readiness
 from app.resilience import AttemptBudget, RecoverableFailure, budget_scope
 from app.tools.catalog import CatalogProduct
 from app.tools.woo_client import WooClient, woo_client_scope
+from app.usage import usage_scope
+
+
+async def purge_conversations(store):
+    while True:
+        await asyncio.sleep(settings.conversation_purge_interval_seconds)
+        try:
+            store.purge_expired()
+        except ConversationError:
+            log_event(event="retention", outcome="error", duration_ms=0,
+                      failure="storage_unavailable")
 
 
 @asynccontextmanager
@@ -73,9 +85,13 @@ async def lifespan(application: FastAPI):
         timeout=settings.provider_timeout_seconds,
         trust_env=False,
     )
+    purge_task = asyncio.create_task(purge_conversations(application.state.conversations))
     try:
         yield
     finally:
+        purge_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await purge_task
         application.state.conversations.close()
         await application.state.woo_client.aclose()
         await application.state.provider_http_client.aclose()
@@ -143,6 +159,30 @@ def _bearer(authorization: str | None) -> str | None:
     return token.strip()
 
 
+async def _conversation_owner(authorization, guest_token, woo, *, allow_new_guest=True):
+    try:
+        token = _bearer(authorization)
+        session = await resolve_session(token, client=woo)
+        identity_key = conversation_identity(token) if session is not None else ""
+    except SessionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except RecoverableFailure:
+        raise HTTPException(status_code=503, detail=FALLBACK_REPLY) from None
+    if session is not None:
+        identity = f"{identity_key}:{session.customer_id}".encode()
+        owner = "auth:" + hashlib.sha256(identity).hexdigest()
+    else:
+        try:
+            if not guest_token or not verify_token(guest_token).startswith("guest:"):
+                raise SessionError("ospite assente")
+        except SessionError:
+            if not allow_new_guest:
+                raise HTTPException(status_code=401, detail="Sessione non valida") from None
+            guest_token = issue_token("guest:" + uuid.uuid4().hex)
+        owner = "anon:" + hashlib.sha256(guest_token.encode()).hexdigest()
+    return owner, session, token, guest_token
+
+
 # Also initialized here for ASGI clients that intentionally skip lifespan.
 app.state.conversations = MemoryConversationStore()
 app.state.rate_limiter = MemoryRateLimiter()
@@ -165,7 +205,7 @@ async def request_correlation(request: Request, call_next):
     request_id = uuid.uuid4().hex
     with correlation(request_id, uuid.uuid4().hex):
         started = time.perf_counter()
-        if request.url.path == "/chat":
+        if request.url.path == "/chat" or request.url.path.startswith("/chat/"):
             # Only the signed bridge assertion can replace the socket peer quota.
             peer = request.client.host if request.client else "unknown"
             identity = "peer:" + hashlib.sha256(peer.encode()).hexdigest()
@@ -257,26 +297,11 @@ async def chat(
         provider_scope = (
             provider_client_scope(provider_client) if provider_client is not None else nullcontext()
         )
-        with budget_scope(budget), woo_client_scope(woo), provider_scope:
-            try:
-                token = _bearer(authorization)
-                session = await resolve_session(token, client=woo)
-                identity_key = conversation_identity(token) if session is not None else ""
-            except SessionError as exc:
-                raise HTTPException(status_code=401, detail=str(exc)) from exc
-            except RecoverableFailure:
-                raise HTTPException(status_code=503, detail=FALLBACK_REPLY) from None
-            guest_token = request.cookies.get("wrag_guest")
-            if session is not None:
-                identity = f"{identity_key}:{session.customer_id}".encode()
-                owner = "auth:" + hashlib.sha256(identity).hexdigest()
-            else:
-                try:
-                    if not guest_token or not verify_token(guest_token).startswith("guest:"):
-                        raise SessionError("ospite assente")
-                except SessionError:
-                    guest_token = issue_token("guest:" + uuid.uuid4().hex)
-                owner = "anon:" + hashlib.sha256(guest_token.encode()).hexdigest()
+        with (budget_scope(budget), woo_client_scope(woo), provider_scope,
+              usage_scope(request.app.state.conversations) as usage):
+            owner, session, token, guest_token = await _conversation_owner(
+                authorization, request.cookies.get("wrag_guest"), woo,
+            )
             conversation = request.app.state.conversations.acquire(req.conversation_id, owner)
             with privacy_scope(
                 token or "",
@@ -286,6 +311,9 @@ async def chat(
             ):
                 message = redact(req.message)
                 result = await answer(message, session=session, history=list(conversation.history))
+                if usage.outcome != "daily_limit":
+                    usage.outcome = ("fallback" if result.reply == FALLBACK_REPLY else
+                                     "uncited" if result.reply == UNCITED_REPLY else "answered")
                 result.reply = redact(result.reply)
                 sources = [
                     ChatSource(
@@ -321,12 +349,32 @@ async def chat(
             await woo.aclose()
 
 
+@app.delete("/chat/{conversation_id}", status_code=204)
+async def delete_conversation(
+    request: Request,
+    conversation_id: str = Path(pattern=r"^[A-Za-z0-9_-]{43}$"),
+    authorization: str | None = Header(default=None),
+):
+    woo = getattr(request.app.state, "woo_client", None)
+    owns_client = woo is None
+    woo = woo or WooClient()
+    try:
+        owner, _, _, _ = await _conversation_owner(
+            authorization, request.cookies.get("wrag_guest"), woo, allow_new_guest=False,
+        )
+        request.app.state.conversations.delete(conversation_id, owner)
+        return Response(status_code=204)
+    finally:
+        if owns_client:
+            await woo.aclose()
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     expose_headers=["Retry-After", "X-Request-ID"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 

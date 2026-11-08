@@ -93,6 +93,30 @@ class Settings(BaseSettings):
     knowledge_state_dir: str = "/state/knowledge"
     embedding_dimensions: int = Field(default=1536, ge=1, le=65536)
 
+    # Corpus esplicito del singolo negozio; stringa CSV per configurazione env semplice.
+    knowledge_page_slugs: str = "spedizioni,resi-e-rimborsi,domande-frequenti"
+    knowledge_include_products: bool = True
+    knowledge_max_pages: int = Field(default=20, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_knowledge_selection(self):
+        import re
+
+        slugs = self.knowledge_page_slug_list
+        if len(slugs) > 200 or any(
+            not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,199}", slug) for slug in slugs
+        ):
+            raise ValueError("Invalid knowledge page slugs")
+        if not slugs and not self.knowledge_include_products:
+            raise ValueError("Select knowledge pages or products")
+        return self
+
+    @property
+    def knowledge_page_slug_list(self) -> list[str]:
+        return list(dict.fromkeys(
+            s.strip() for s in self.knowledge_page_slugs.split(",") if s.strip()
+        ))
+
     # RAG: numero di chunk recuperati e distanza massima (coseno, 0=identico)
     # oltre la quale un chunk è considerato non pertinente. Vedi docs DEC-005:
     # la soglia va calibrata con `evals/run_eval.py`.
@@ -127,6 +151,7 @@ class Settings(BaseSettings):
     demo_enabled: bool = False
     conversation_db_path: str = "state/conversations.sqlite3"
     conversation_ttl_seconds: int = Field(default=1800, ge=1)
+    conversation_purge_interval_seconds: float = Field(default=60, gt=0, le=3600)
     conversation_capacity: int = Field(default=1000, ge=1)
     conversation_max_turns: int = Field(default=20, ge=1, le=100)
     message_max_bytes: int = Field(default=4000, ge=1, le=16000)
@@ -134,6 +159,8 @@ class Settings(BaseSettings):
     chat_body_max_bytes: int = Field(default=24000, ge=256, le=200000)
     model_context_max_bytes: int = Field(default=32000, ge=1, le=200000)
     model_token_budget: int = Field(default=100000, ge=1, le=1000000)
+    # Persistent generation + retrieval-embedding reservations per UTC day; 0 = no cap.
+    provider_daily_unit_limit: int = Field(default=0, ge=0)
     model_max_output_tokens: int = Field(default=512, ge=1, le=4096)
     tool_output_max_bytes: int = Field(default=12000, ge=1, le=100000)
     customer_cache_ttl_seconds: int = Field(default=300, ge=1)

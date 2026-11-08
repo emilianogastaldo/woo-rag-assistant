@@ -18,6 +18,7 @@ function wrag_sanitize_options($input) {
         }
         $input[$key] = trim($input[$key]);
     }
+    $input['title'] = sanitize_text_field($input['title']);
     $url = wp_parse_url($input['backend_url']);
     if ($input['backend_url'] !== '' && (!$url || ($url['scheme'] ?? '') !== 'https'
         || isset($url['user']) || isset($url['pass'])
@@ -27,14 +28,14 @@ function wrag_sanitize_options($input) {
     }
     $secret = $input['bridge_secret'] === '' ? ($previous['bridge_secret'] ?? '') : $input['bridge_secret'];
     if (($secret !== '' && (strlen($secret) < 32 || strlen($secret) > 4096))
-        || $input['title'] === '' || strlen($input['title']) > 240
+        || !preg_match('/^.{1,80}$/usD', $input['title'])
         || !preg_match('/^#[A-Fa-f0-9]{6}$/D', $input['color'])
         || !in_array($input['position'], ['left', 'right'], true)) {
         add_settings_error('wrag_options', 'invalid', 'Controllare secret (minimo 32 caratteri), titolo (massimo 80 caratteri), colore e posizione.');
         return $previous;
     }
     return ['backend_url' => rtrim($input['backend_url'], '/'), 'bridge_secret' => $secret,
-        'title' => sanitize_text_field($input['title']), 'color' => $input['color'], 'position' => $input['position']];
+        'title' => $input['title'], 'color' => $input['color'], 'position' => $input['position']];
 }
 
 function wrag_diagnostic() {
@@ -91,7 +92,8 @@ function wrag_settings_page() {
         } else {
             $type = ['bridge_secret' => 'password', 'backend_url' => 'url', 'color' => 'color'][$key] ?? 'text';
             // Never reflect secrets, even in an administrator response.
-            $value = $key === 'bridge_secret' ? '' : wrag_setting($key);
+            $value = $key === 'bridge_secret' ? '' : ($key === 'backend_url'
+                ? (get_option('wrag_options', [])['backend_url'] ?? '') : wrag_setting($key));
             echo '<input id="wrag-' . esc_attr($key) . '" type="' . esc_attr($type) . '" name="wrag_options[' . esc_attr($key)
                 . ']" value="' . esc_attr($value) . '" autocomplete="off">';
         }

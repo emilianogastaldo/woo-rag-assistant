@@ -99,6 +99,7 @@
     .wrag-launcher{background:${COLOR};border-color:${COLOR};color:${INK}}
     .wrag-head{background:${COLOR};color:${INK}}
     .wrag-head button{color:${INK};border-color:currentColor}
+    .wrag-head button:focus-visible{outline-color:${INK}}
     ${LEFT ? '.wrag-launcher,.wrag-panel{left:24px;right:auto}@media(max-width:480px){.wrag-launcher,.wrag-panel{left:12px;right:auto}}' : ''}
   `;
   document.head.appendChild(style);
