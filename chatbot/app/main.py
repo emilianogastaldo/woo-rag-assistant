@@ -47,10 +47,11 @@ from app.conversations import (
 )
 from app.http_clients import provider_client_scope
 from app.observability import correlation, log_event
-from app.privacy import privacy_scope, redact
+from app.privacy import privacy_scope, redact, redact_values
 from app.rag.versions import VersionError
 from app.readiness import check_readiness
 from app.resilience import AttemptBudget, RecoverableFailure, budget_scope
+from app.tools.catalog import CatalogProduct
 from app.tools.woo_client import WooClient, woo_client_scope
 from app.usage import usage_scope
 
@@ -138,6 +139,7 @@ class ChatResponse(BaseModel):
     )
     authenticated: bool = False
     tools_used: list[str] = []
+    products: list[CatalogProduct] = Field(default_factory=list)
 
 
 class DemoLoginRequest(BaseModel):
@@ -319,6 +321,8 @@ async def chat(
                     )
                     for source in result.sources
                 ]
+                products = [CatalogProduct.model_validate(redact_values(product.model_dump()))
+                            for product in result.products]
                 request.app.state.conversations.commit(conversation, message, result.reply)
             if session is None:
                 response.set_cookie(
@@ -336,6 +340,7 @@ async def chat(
             sources=sources,
             authenticated=session is not None,
             tools_used=result.tools_used,
+            products=products,
         )
     finally:
         if conversation is not None:

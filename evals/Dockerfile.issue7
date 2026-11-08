@@ -10,3 +10,12 @@ COPY --from=assets /opt/woocommerce /usr/src/wordpress/wp-content/plugins/woocom
 FROM wordpress:cli-php8.5@sha256:b28e27e8e5f49cbf55ea3c0e533fda280707b8cc6cf85ace085d2746856c037a AS cli
 COPY evals/issue7_seed.php /seed.php
 COPY evals/issue7_seed.sh /seed.sh
+
+# Optional MCP experiment; not installed in the ordinary demo image.
+FROM assets AS mcp-assets
+RUN curl -fsSL https://downloads.wordpress.org/plugin/mcp-adapter.0.7.1.zip -o /tmp/mcp.zip \
+    && echo '719d81aa1250615acfd8256f0acc8c13f1712f1ae398c3d5883c8b166024fe9b  /tmp/mcp.zip' | sha256sum -c - \
+    && unzip -q /tmp/mcp.zip -d /opt
+
+FROM wordpress AS wordpress-mcp
+COPY --from=mcp-assets /opt/mcp-adapter /usr/src/wordpress/wp-content/plugins/mcp-adapter

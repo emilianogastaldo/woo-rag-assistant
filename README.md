@@ -342,6 +342,33 @@ Anteprime Trama: [homepage desktop](docs/screenshots/trama-home-desktop.png),
 [catalogo](docs/screenshots/trama-catalog-desktop.png) e
 [chat mobile](docs/screenshots/trama-chat-mobile.png) con risposta simulata.
 
+`cerca_prodotti` filtra il catalogo live per testo, categoria (nome/slug verificato),
+prezzo, stock e pagina. La disponibilità predefinita è `instock`; gli altri stati
+richiedono un filtro esplicito. La valuta ISO si configura con `WC_CURRENCY`
+(default `EUR`), che deve corrispondere alla valuta del negozio. I prezzi REST non
+includono una valuta per prodotto.
+
+Ogni ricerca legge una pagina di massimo 10 prodotti e, per ciascun prodotto
+variabile, una pagina di massimo 10 varianti. Riporta solo varianti pubblicate che
+rispettano budget e disponibilità: il prezzo del padre non prova il prezzo di una
+variante acquistabile. `may_have_more` segnala una pagina potenzialmente parziale;
+non viene effettuata una scansione completa. Il filtro categoria verifica un nome
+o slug esatto nei primi 20 risultati della ricerca categorie; in caso ambiguo o
+assente chiede di precisarlo. Prodotti privati o nascosti sono esclusi anche se il
+server ignora i filtri. Per le caratteristiche si usa la KB, per prezzo e stock
+i risultati live.
+
+`POST /chat` aggiunge `products` (default `[]`) ai campi già esistenti. Le schede
+provengono esclusivamente dall'ultima ricerca prodotti verificata del turno;
+testo e cronologia del modello non possono crearle. Una nuova ricerca vuota o
+fallita azzera le schede di quel turno. Il widget usa testo DOM e link/immagini
+HTTP(S) verificati, senza interpretare HTML del modello o del catalogo.
+
+I tre casi sintetici in `evals/catalog-gifts.jsonl` verificano il meccanismo di
+consiglio entro budget, astensione e chiarimento con `ScriptedLLM` e Woo finti:
+`pytest -q tests/test_product_cards.py`. Non misurano la capacità di un modello
+reale di scegliere prodotti pertinenti; quella prova resta separata in #17.
+
 L’elenco generale usa `elenco_prodotti`, senza ricerca vettoriale: legge fino a
 10 prodotti pubblicati e segnala se il catalogo continua. Le risposte basate solo
 su questi dati non hanno citazioni documentali (`sources: []`). Per descrizioni
