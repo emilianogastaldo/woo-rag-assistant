@@ -464,13 +464,29 @@ Il logout del widget elimina il token locale; non è revoca server-side di token
 copiati, che restano validi fino alla scadenza. Ruotare il secret invalida tutti.
 
 Il limite `/chat` precede autenticazione e parsing JSON, comprende richieste
-invalide e usa digest del peer di rete: finestra fissa e `Retry-After` su 429.
+invalide e usa digest del peer di rete per gli accessi diretti: finestra fissa e
+`Retry-After` su 429. Dal lavoro #29 il bridge invia `X-WRAG-Visitor`, un'attestazione
+HMAC con scadenza di 30 secondi e purpose `rate-limit:`. Solo una firma valida con
+`WRAG_BRIDGE_SECRET` seleziona la quota visitatore. L'identità è un HMAC dell'ID
+account nativo oppure di `REMOTE_ADDR` per gli ospiti, con namespace separati:
+nessun UID o IP grezzo raggiunge il modello, il browser o i log. Cambiare cookie,
+nonce o sessione di login non rinnova la quota dello stesso account/IP.
+L'attestazione non concede autenticazione e non è intercambiabile con i bearer.
+Una firma non valida consuma la quota del peer e restituisce 401, o 429 a quota
+esaurita. Un secondo limiter applica `RATE_LIMIT_GLOBAL_REQUESTS` (default 200)
+all'insieme delle richieste, incluso il traffico rifiutato, nella stessa finestra.
+La quota individuale resta 20/60 s: utenti distinti del bridge sono indipendenti
+finché il tetto globale e la capacità del limiter non sono esauriti.
 Il body è letto per chunk entro una dimensione massima; errori di validazione
 non includono input o segreti. Middleware CORS esterno applica gli header anche
 ai rifiuti anticipati. Con `--no-proxy-headers`, X-Forwarded-For non permette di
-cambiare quota. Dietro proxy applicare quote al proxy su IP verificati; altrimenti
-il backend vede un solo peer condiviso. Il rate limiter non rimuove chiavi attive
+cambiare quota. Davanti a WordPress, il web server deve risolvere `REMOTE_ADDR`
+solo da proxy fidati: altrimenti gli ospiti condividono l'IP del proxy. I client
+dietro NAT condividono la quota ospite. Il rate limiter non rimuove chiavi attive
 per fare spazio a nuove identità; a capienza piena rifiuta temporaneamente.
+Quote in memoria, singolo worker e reset al riavvio restano limiti espliciti.
+Le porte del Compose demo sono su loopback; il
+[runbook del bridge](bridge-deployment.md) descrive il confine di deployment.
 
 Gli output tool (inclusi documenti e campi Woo) entrano nel modello solo come
 `ToolMessage` con oggetto JSON `untrusted_data`. Le istruzioni di sistema indicano
