@@ -37,6 +37,9 @@ Widget chat (JS) → Backend FastAPI → { ChromaDB | OpenAI | WooCommerce REST 
 | Ingestion | `chatbot/app/ingest.py` | WooCommerce/WP → chunking → embedding → Chroma |
 | Widget | `widget/chat.js` | UI chat incorporabile con un solo tag |
 
+Per lo ZIP WordPress installabile, le impostazioni admin e il rollout su negozi esistenti:
+[runbook plugin](docs/wordpress-plugin.md).
+
 Le decisioni di design sono in [`docs/architecture.md`](docs/architecture.md).
 
 ## Hybrid retrieval e diagnostica

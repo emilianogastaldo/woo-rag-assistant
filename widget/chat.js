@@ -12,6 +12,13 @@
 
   const script = document.currentScript;
   const API = (script && script.dataset.api) || window.WOO_RAG_API || "http://localhost:8000";
+  const TITLE = (script && script.dataset.title || "Assistente del negozio").slice(0, 80);
+  const COLOR = script && /^#[0-9a-f]{6}$/i.test(script.dataset.color) ? script.dataset.color : "#315C49";
+  const luminance = [1, 3, 5].map(index => parseInt(COLOR.slice(index, index + 2), 16) / 255)
+    .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+  const INK = luminance > 0.179 ? "#000" : "#fff";
+  const LEFT = script && script.dataset.position === "left";
   const WP_NONCE = script && script.dataset.wpNonce;
 
   const state = {
@@ -88,7 +95,13 @@
   }
 
   const style = el("style");
-  style.textContent = STYLES;
+  style.textContent = STYLES + `
+    .wrag-launcher{background:${COLOR};border-color:${COLOR};color:${INK}}
+    .wrag-head{background:${COLOR};color:${INK}}
+    .wrag-head button{color:${INK};border-color:currentColor}
+    .wrag-head button:focus-visible{outline-color:${INK}}
+    ${LEFT ? '.wrag-launcher,.wrag-panel{left:24px;right:auto}@media(max-width:480px){.wrag-launcher,.wrag-panel{left:12px;right:auto}}' : ''}
+  `;
   document.head.appendChild(style);
 
   const launcher = el("button", "wrag-launcher", "Chat");
@@ -104,7 +117,7 @@
   panel.dataset.open = "false";
 
   const head = el("div", "wrag-head");
-  const title = el("strong", null, "Assistente del negozio");
+  const title = el("strong", null, TITLE);
   title.id = "wrag-title";
   head.appendChild(title);
   const headNote = el("span", null, "Sessione: ospite");

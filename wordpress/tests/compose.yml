@@ -1,0 +1,43 @@
+services:
+  db:
+    image: mariadb@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4
+    environment:
+      MARIADB_DATABASE: plugin_test
+      MARIADB_USER: plugin_test
+      MARIADB_PASSWORD: synthetic-database-password
+      MARIADB_ROOT_PASSWORD: synthetic-root-password
+    tmpfs: [/var/lib/mysql]
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 2s
+      retries: 30
+  wordpress:
+    image: wordpress:7.1.4-php8.5-apache@sha256:63f89c89eeba29421a2660ccc87be392e6d72148724d92fa3d0756e9700786b9
+    environment: &wp_env
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: plugin_test
+      WORDPRESS_DB_USER: plugin_test
+      WORDPRESS_DB_PASSWORD: synthetic-database-password
+      WORDPRESS_CONFIG_EXTRA: "define('WP_HTTP_BLOCK_EXTERNAL', true); define('DISABLE_WP_CRON', true);"
+    volumes: [wp:/var/www/html]
+    healthcheck:
+      test: [CMD-SHELL, test -f /var/www/html/wp-config.php]
+      interval: 2s
+      retries: 30
+    depends_on:
+      db: {condition: service_healthy}
+  wpcli:
+    image: wordpress:cli-php8.5@sha256:b28e27e8e5f49cbf55ea3c0e533fda280707b8cc6cf85ace085d2746856c037a
+    environment: *wp_env
+    user: "33:33"
+    volumes:
+      - wp:/var/www/html
+      - ../../dist/woo-rag-assistant.zip:/source/dist/woo-rag-assistant.zip:ro
+      - ./native-plugin.php:/source/wordpress/tests/native-plugin.php:ro
+    depends_on: [wordpress]
+volumes:
+  wp:
+
+networks:
+  default:
+    internal: true

@@ -25,7 +25,10 @@ class Request {
     public function get_json_params() { return json_decode($this->body, true); }
     public function get_param($name) { return $this->conversation_id; }
 }
-function add_action(...$args) {}
+$hooks = [];
+$stored_options = [];
+function get_option($name, $default = false) { global $stored_options; return $stored_options ?: $default; }
+function add_action($name, $callback) { global $hooks; $hooks[$name][] = $callback; }
 function wp_verify_nonce(...$args) { global $valid_nonce; return $valid_nonce; }
 function wp_get_session_token() { global $session; return $session; }
 function is_user_logged_in() { global $uid; return $uid > 0; }
@@ -40,7 +43,7 @@ function is_wp_error($value) { return $value instanceof WP_Error; }
 function wp_remote_retrieve_body($value) { return $value['body']; }
 function wp_remote_retrieve_response_code($value) { return $value['status']; }
 function wp_remote_retrieve_header($value, $name) { return $value[$name] ?? ''; }
-function wp_parse_url($value, $part) { return parse_url($value, $part); }
+function wp_parse_url($value, $part = -1) { return parse_url($value, $part); }
 function rest_url($path) { return 'https://store.test/wp-json/' . $path; }
 function wc_get_page_permalink($page, $fallback = '') {
     global $account_page;
