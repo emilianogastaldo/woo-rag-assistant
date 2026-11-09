@@ -92,6 +92,8 @@ def main():
                 "http://wordpress/wp-json/wc/v3")
             assert app_env["OPENAI_API_KEY"] == "synthetic-secret"
             assert app_env["WC_CONSUMER_KEY"] == "ck_synthetic"
+            if name == "dev":
+                assert app_env["CONVERSATION_DB_PATH"] == "/tmp/conversations.sqlite3"
     assert not run(["docker", "ps", "-aq", "--filter",
                     f"label=com.docker.compose.project={project}"]).strip()
     for resource, names in (("volume", inventory["volumes"]), ("network", [inventory["network"]])):
@@ -131,6 +133,9 @@ def main():
         inventory["status"] = "PASS"
     except (subprocess.SubprocessError, AssertionError):
         inventory["status"] = "FAIL"
+        logs = subprocess.run([*base, "logs", "--no-color", "--tail", "200"],
+                              env=env, capture_output=True, text=True, timeout=30)
+        (output / "failure.log").write_text(logs.stdout + logs.stderr)
         raise
     finally:
         # Validate ownership immediately before destructive cleanup; explicit test project only.
