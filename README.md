@@ -578,7 +578,7 @@ sweep di retrieval è ora protetto da opt-in. Comandi, costi, definizioni delle
 metriche e limiti sono in [`evals/README.md`](evals/README.md).
 
 Il [report #17](docs/issue-17-results.md) documenta i casi contestuali aggiuntivi,
-preflight e costi da usage; le prove con provider reale restano da autorizzare.
+preflight, costi da usage e la baseline con provider reale del 2026-11-09.
 Per caricare prodotti di prova, vedere il [confronto seed/CSV ufficiale #19](docs/issue-19-results.md).
 
 ## Stack

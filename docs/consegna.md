@@ -41,7 +41,7 @@ La demo interattiva richiede una propria chiave OpenAI con credito; i
 | Ingestion, embedding e retrieval | [Ingestion versionata](ingestion-deployment.md), ricerca semantica/ibrida e citazioni verificabili. |
 | Tool calling e orchestrazione | Ricerca documentale, catalogo e ordini; scelta delle fonti, budget, retry e fallback. |
 | Memoria e sicurezza | [Persistenza conversazioni](issue-16-results.md), [login e isolamento clienti](issue-18-results.md). |
-| Valutazione e limiti | [Eval](../evals/README.md), test offline e integrazioni isolate; [valutazione live ancora da eseguire](issue-17-results.md). |
+| Valutazione e limiti | [Eval](../evals/README.md), test offline e integrazioni isolate; [baseline live con provider reale](issue-17-results.md). |
 | Dati riproducibili | [Seed sintetico e CSV campione](issue-19-results.md), senza dati aziendali o clienti reali. |
 
 Il chatbot espone strumenti di sola lettura sul negozio. Non modifica ordini,
@@ -66,9 +66,10 @@ La checklist è da verificare sulla versione effettivamente consegnata.
 - [ ] Provare il percorso demo nel browser e spiegare le scelte progettuali.
 - [ ] Condividere il link GitHub con il canale indicato dai docenti entro il 18/12.
 
-La valutazione live della #17 resta un miglioramento da completare con budget
-approvato prima di dichiarare qualità, latenza o costi reali. Non è indicata
-nell’email come condizione obbligatoria per la consegna. Anche la messa in
+La baseline live della #17 è stata eseguita il 2026-11-09 (34 casi × 3, 0,14 USD
+stimati): 63,7% di turni superati, p95 2,4 s. I fallimenti principali riguardano
+citazioni e caso misto ordine + policy. Non è indicata nell’email come condizione
+obbligatoria per la consegna. Anche la messa in
 produzione su un negozio reale è distinta dalla consegna del project work.
 
 Se si sceglie di presentare il 19/12, usare la [traccia](presentazione.md),
